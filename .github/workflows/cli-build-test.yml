@@ -1,10 +1,10 @@
-name: CLI Cross-Platform Build
+name: CLI Build Test
 
 on:
   push:
-    branches: [ cli-test ]
+    branches: [ main ]
   pull_request:
-    branches: [ cli-test ]
+    branches: [ main ]
 
 jobs:
   build-ubuntu:
@@ -17,6 +17,10 @@ jobs:
         toolchain: stable
         profile: minimal
         override: true
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libavformat-dev libavfilter-dev libavdevice-dev ffmpeg libasound2-dev tesseract-ocr libtesseract-dev
     - name: Build
       run: cargo build --release
     - name: Test
