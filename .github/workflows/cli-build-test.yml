@@ -2,9 +2,9 @@ name: CLI Build Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ cli-test ]
   pull_request:
-    branches: [ main ]
+    branches: [ cli-test ]
 
 jobs:
   build-ubuntu:
