@@ -36,6 +36,28 @@ jobs:
         toolchain: stable
         profile: minimal
         override: true
+    - name: Setup Visual Studio Build Tools
+      uses: microsoft/setup-msbuild@v1.1
+    - name: Install Visual Studio components
+      run: |
+        choco install visualstudio2022buildtools -y
+        choco install visualstudio2022-workload-vctools -y
+        choco install cmake -y
+    - name: Install additional tools
+      run: |
+        choco install pkgconfiglite -y
+    - name: Setup vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        cd vcpkg
+        .\bootstrap-vcpkg.bat -disableMetrics
+        .\vcpkg.exe integrate install --disable-metrics
+        .\vcpkg.exe install ffmpeg
+    - name: Set environment variables
+      run: |
+        echo "PKG_CONFIG_PATH=$env:GITHUB_WORKSPACE\vcpkg\packages\ffmpeg_x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
+        echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
+        echo "LIBCLANG_PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin" >> $env:GITHUB_ENV
     - name: Build
       run: cargo build --release
     - name: Test
