@@ -30,13 +30,30 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v3
+    - uses: actions/cache@v3
+      with:
+        path: |
+          ~\AppData\Local\cargo\
+          target\
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
         toolchain: stable
         profile: minimal
         override: true
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+    - name: Run pre_build.js
+      shell: bash
+      run: bun ./scripts/pre_build.js
+      working-directory: ./examples/apps/screenpipe-app-tauri
+    - name: Copy test image
+      shell: bash
+      run: |
+        mkdir -p target/debug/deps || true
+        cp screenpipe-vision/tests/testing_OCR.png target/debug/deps/
     - name: Build
       run: cargo build --release
-    - name: Test
-      run: cargo test --release
+    - name: Run specific Windows OCR test
+      run: cargo test test_process_ocr_task_windows
