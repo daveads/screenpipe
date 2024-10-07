@@ -1,125 +1,91 @@
-use anyhow::Result;
-use candle::{DType, Device, Tensor};
-use candle_nn::VarBuilder;
-use candle_transformers::models::phi3::{Config as Phi3Config, Model as Phi3};
-
-use hf_hub::{api::sync::Api, Repo, RepoType};
-use tokenizers::Tokenizer;
-
-/// Loads the safetensors files for a model from the hub based on a json index file.
-pub fn hub_load_safetensors(
-    repo: &hf_hub::api::sync::ApiRepo,
-    json_file: &str,
-) -> Result<Vec<std::path::PathBuf>> {
-    let json_file = repo.get(json_file).map_err(candle::Error::wrap)?;
-    let json_file = std::fs::File::open(json_file)?;
-    let json: serde_json::Value =
-        serde_json::from_reader(&json_file).map_err(candle::Error::wrap)?;
-    let weight_map = match json.get("weight_map") {
-        None => anyhow::bail!("no weight map in {json_file:?}"),
-        Some(serde_json::Value::Object(map)) => map,
-        Some(_) => anyhow::bail!("weight map in {json_file:?} is not a map"),
-    };
-    let mut safetensors_files = std::collections::HashSet::new();
-    for value in weight_map.values() {
-        if let Some(file) = value.as_str() {
-            safetensors_files.insert(file.to_string());
-        }
+#[cfg(feature = "llm")]
+mod llm_module {
+    /// This is a wrapper around a tokenizer to ensure that tokens can be returned to the user in a
+    /// streaming way rather than having to wait for the full decoding.
+    pub struct TokenOutputStream {
+        tokenizer: tokenizers::Tokenizer,
+        tokens: Vec<u32>,
+        prev_index: usize,
+        current_index: usize,
     }
-    let safetensors_files = safetensors_files
-        .iter()
-        .map(|v| repo.get(v).map_err(anyhow::Error::from))
-        .collect::<Result<Vec<_>, anyhow::Error>>()?;
-    Ok(safetensors_files)
-}
 
-pub fn load_llama_model(device: &Device) -> Result<(Phi3, Tokenizer)> {
-    let api = Api::new()?;
-    let model_id = "microsoft/Phi-3-mini-4k-instruct";
-    let revision = "main";
-
-    let api = api.repo(Repo::with_revision(
-        model_id.to_string(),
-        RepoType::Model,
-        revision.to_string(),
-    ));
-    let tokenizer_filename = api.get("tokenizer.json")?;
-    let config_filename = api.get("config.json")?;
-
-    let config: Phi3Config = serde_json::from_slice(&std::fs::read(config_filename)?)?;
-
-    // https://github.com/huggingface/candle/blob/ddafc61055601002622778b7762c15bd60057c1f/candle-examples/examples/phi/main.rs#L364
-    // let dtype = DType::BF16;
-    let dtype = DType::F32;
-
-    let filenames = hub_load_safetensors(&api, "model.safetensors.index.json")?;
-    let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, device)? };
-
-    let model = Phi3::new(&config, vb)?;
-    let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(anyhow::Error::msg)?;
-
-    Ok((model, tokenizer))
-}
-
-pub fn generate_text_streaming<F>(
-    model: &mut Phi3,
-    tokenizer: &Tokenizer,
-    prompt: &str,
-    max_tokens: usize,
-    temperature: f64,
-    device: &Device,
-    mut callback: F,
-) -> Result<()>
-where
-    F: FnMut(String) -> Result<()>,
-{
-    let mut logits_processor =
-        candle_transformers::generation::LogitsProcessor::new(42, Some(temperature), None);
-
-    let mut tokens = tokenizer.encode(prompt, true).map_err(anyhow::Error::msg)?;
-
-    let eos_token = tokenizer.token_to_id("</s>");
-    let bos_token = tokenizer.token_to_id("<s>");
-
-    let mut all_tokens = if let Some(bos_token) = bos_token {
-        std::iter::once(bos_token)
-            .chain(tokens.get_ids().iter().cloned())
-            .collect::<Vec<_>>()
-    } else {
-        tokens.get_ids().to_vec()
-    };
-    for index in 0..max_tokens {
-        let context_size = if index > 0 { 1 } else { tokens.get_ids().len() };
-        let start_pos = tokens.get_ids().len().saturating_sub(context_size);
-        let input = Tensor::new(&tokens.get_ids()[start_pos..], device)?.unsqueeze(0)?; // Add a batch dimension
-
-        let logits = model.forward(&input, start_pos)?;
-        let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
-        let logits = if temperature == 0. {
-            logits
-        } else {
-            let temp_tensor = Tensor::new(&[temperature], device)?;
-            logits.div(&temp_tensor)?
-        };
-        let next_token = logits_processor.sample(&logits)?;
-        let text = tokenizer
-            .decode(&[next_token], false)
-            .map_err(anyhow::Error::msg)?;
-        tokens = tokenizer.encode(text, true).map_err(anyhow::Error::msg)?;
-        all_tokens.push(next_token);
-
-        if let Some(eos_token) = eos_token {
-            if next_token == eos_token {
-                break;
+    impl TokenOutputStream {
+        pub fn new(tokenizer: tokenizers::Tokenizer) -> Self {
+            Self {
+                tokenizer,
+                tokens: Vec::new(),
+                prev_index: 0,
+                current_index: 0,
             }
         }
 
-        let text = tokenizer
-            .decode(&[next_token], true)
-            .map_err(anyhow::Error::msg)?;
-        callback(text)?;
+        pub fn into_inner(self) -> tokenizers::Tokenizer {
+            self.tokenizer
+        }
 
+        fn decode(&self, tokens: &[u32]) -> anyhow::Result<String> {
+            match self.tokenizer.decode(tokens, true) {
+                Ok(str) => Ok(str),
+                Err(err) => anyhow::bail!("cannot decode: {err}"),
+            }
+        }
+
+        // https://github.com/huggingface/text-generation-inference/blob/5ba53d44a18983a4de32d122f4cb46f4a17d9ef6/server/text_generation_server/models/model.py#L68
+        pub fn next_token(&mut self, token: u32) -> anyhow::Result<Option<String>> {
+            let prev_text = if self.tokens.is_empty() {
+                String::new()
+            } else {
+                let tokens = &self.tokens[self.prev_index..self.current_index];
+                self.decode(tokens)?
+            };
+            self.tokens.push(token);
+            let text = self.decode(&self.tokens[self.prev_index..])?;
+            if text.len() > prev_text.len() && text.chars().last().unwrap().is_alphanumeric() {
+                let text = text.split_at(prev_text.len());
+                self.prev_index = self.current_index;
+                self.current_index = self.tokens.len();
+                Ok(Some(text.1.to_string()))
+            } else {
+                Ok(None)
+            }
+        }
+
+        pub fn decode_rest(&self) -> anyhow::Result<Option<String>> {
+            let prev_text = if self.tokens.is_empty() {
+                String::new()
+            } else {
+                let tokens = &self.tokens[self.prev_index..self.current_index];
+                self.decode(tokens)?
+            };
+            let text = self.decode(&self.tokens[self.prev_index..])?;
+            if text.len() > prev_text.len() {
+                let text = text.split_at(prev_text.len());
+                Ok(Some(text.1.to_string()))
+            } else {
+                Ok(None)
+            }
+        }
+
+        pub fn decode_all(&self) -> anyhow::Result<String> {
+            self.decode(&self.tokens)
+        }
+
+        pub fn get_token(&self, token_s: &str) -> Option<u32> {
+            self.tokenizer.get_vocab(true).get(token_s).copied()
+        }
+
+        pub fn tokenizer(&self) -> &tokenizers::Tokenizer {
+            &self.tokenizer
+        }
+
+        pub fn clear(&mut self) {
+            self.tokens.clear();
+            self.prev_index = 0;
+            self.current_index = 0;
+        }
     }
-
-    Ok(())
 }
+
+// Optionally, you can re-export the module contents if needed
+#[cfg(feature = "llm")]
+pub use llm_module::*;

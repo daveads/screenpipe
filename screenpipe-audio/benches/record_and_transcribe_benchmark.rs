@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use screenpipe_audio::vad_engine::VadSensitivity;
 use screenpipe_audio::{
     create_whisper_channel, default_input_device, record_and_transcribe, AudioDevice, AudioInput,
     AudioTranscriptionEngine,
@@ -7,21 +8,25 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
 
 async fn setup_test() -> (
     Arc<AudioDevice>,
     PathBuf,
-    mpsc::UnboundedSender<AudioInput>,
+    crossbeam::channel::Sender<AudioInput>,
     Arc<AtomicBool>,
 ) {
     let audio_device = default_input_device().unwrap(); // TODO feed voice in automatically somehow
     let output_path = PathBuf::from("/tmp/test_audio.mp4");
     // let (whisper_sender, _) = mpsc::unbounded_channel();
-    let (whisper_sender, _) =
-        create_whisper_channel(Arc::new(AudioTranscriptionEngine::WhisperDistilLargeV3))
-            .await
-            .unwrap();
+    let (whisper_sender, _, _) = create_whisper_channel(
+        Arc::new(AudioTranscriptionEngine::WhisperDistilLargeV3),
+        screenpipe_audio::VadEngineEnum::Silero,
+        None,
+        &output_path,
+        VadSensitivity::High,
+    )
+    .await
+    .unwrap();
     let is_running = Arc::new(AtomicBool::new(true));
 
     (
@@ -33,25 +38,28 @@ async fn setup_test() -> (
 }
 
 fn bench_record_and_transcribe(c: &mut Criterion) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4) // Adjust based on your system
+        .enable_all()
+        .build()
+        .unwrap();
 
     let mut group = c.benchmark_group("Record and Transcribe");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(90)); // Increased from 30 to 60 seconds
 
     group.bench_function(BenchmarkId::new("Performance", ""), |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
+        b.to_async(&runtime).iter_custom(|iters| async move {
             let mut total_duration = Duration::new(0, 0);
 
             for _ in 0..iters {
-                let (audio_device, output_path, whisper_sender, is_running) = setup_test().await;
+                let (audio_device, _, whisper_sender, is_running) = setup_test().await;
                 let duration = Duration::from_secs(5); // 5 seconds of recording
 
                 let start = std::time::Instant::now();
                 let result = record_and_transcribe(
                     black_box(audio_device),
                     black_box(duration),
-                    black_box(output_path),
                     black_box(whisper_sender),
                     black_box(is_running),
                 )

@@ -34,15 +34,16 @@ public func performOCR(imageData: UnsafePointer<UInt8>, length: Int, width: Int,
     let context = CIContext(options: nil)
 
     // Apply preprocessing filters (slightly reduced contrast compared to original)
-    let processed =
-      ciImage
-      .applyingFilter(
-        "CIColorControls", parameters: [kCIInputSaturationKey: 0, kCIInputContrastKey: 1.08]
-      )
-      .applyingFilter(
-        "CIUnsharpMask", parameters: [kCIInputRadiusKey: 0.8, kCIInputIntensityKey: 0.4])
-
-    guard let preprocessedCGImage = context.createCGImage(processed, from: processed.extent) else {
+    // let processed =
+    //   ciImage
+    //   .applyingFilter(
+        // "CIColorControls", parameters: [kCIInputContrastKey: 1.2]
+    //   )
+    //   .applyingFilter(
+    //     "CIUnsharpMask", parameters: [kCIInputRadiusKey: 0.5, kCIInputIntensityKey: 0.7])
+    let processed = ciImage
+  
+    guard let preprocessedCGImage = context.createCGImage(ciImage, from: ciImage.extent) else {
       return strdup("Error: Failed to create preprocessed image")
     }
 
@@ -91,7 +92,9 @@ public func performOCR(imageData: UnsafePointer<UInt8>, length: Int, width: Int,
       }
     }
 
-    textRequest.recognitionLevel = .accurate  // Keep accurate recognition
+    textRequest.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
+    textRequest.recognitionLevel = .accurate
+    textRequest.usesLanguageCorrection = true
 
     let handler = VNImageRequestHandler(cgImage: preprocessedCGImage, options: [:])
     do {
@@ -137,6 +140,8 @@ Compile for multi arch:
 swiftc -emit-library -target x86_64-apple-macosx11.0 -o screenpipe-vision/lib/libscreenpipe_x86_64.dylib screenpipe-vision/src/ocr.swift -framework Metal -framework MetalPerformanceShaders -framework Vision -framework CoreImage \
 && swiftc -emit-library -target arm64-apple-macosx11.0 -o screenpipe-vision/lib/libscreenpipe_arm64.dylib screenpipe-vision/src/ocr.swift -framework Metal -framework MetalPerformanceShaders -framework Vision -framework CoreImage \
 && lipo -create screenpipe-vision/lib/libscreenpipe_x86_64.dylib screenpipe-vision/lib/libscreenpipe_arm64.dylib -output screenpipe-vision/lib/libscreenpipe.dylib
+
+atm dirty hack: cp screenpipe-vision/lib* /usr/local/lib
 
 How to optimise this code:
 
