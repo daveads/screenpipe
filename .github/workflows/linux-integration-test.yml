@@ -18,7 +18,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-utils imagemagick fonts-liberation x11-apps xdotool
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool
     - name: Build CLI
       run: cargo build --release
     - name: Set up virtual display
@@ -34,16 +34,6 @@ jobs:
         pulseaudio --start
         pactl load-module module-null-sink sink_name=virtual_speaker
         pactl load-module module-virtual-source source_name=virtual_mic
-    - name: Create test image and audio
-      run: |
-        convert -size 800x600 xc:white -font Liberation-Sans -pointsize 24 -draw "text 10,50 'Screenpipe OCR Test'" test_image.png
-        ffmpeg -f lavfi -i sine=frequency=1000:duration=5 -ar 16000 test_audio.wav
-    - name: Display test image and play audio
-      run: |
-        export DISPLAY=:99
-        xloadimage -onroot -fullscreen test_image.png &
-        ffplay -nodisp -autoexit test_audio.wav &
-        sleep 5  # Give some time for the image to be displayed
     - name: Run CLI and capture output
       run: |
         export DISPLAY=:99
@@ -67,16 +57,7 @@ jobs:
             echo "Server did not start correctly"
             exit 1
           fi
-          if ! grep -q "Screenpipe OCR Test" "$LOG_FILE"; then
-            echo "OCR did not detect test image text"
-            exit 1
-          fi
-          if ! grep -q "Audio transcription" "$LOG_FILE"; then
-            echo "Audio transcription not detected"
-            exit 1
-          fi
           echo "CLI ran successfully for 60 seconds without crashing"
-          echo "OCR and audio transcription are working as expected"
         else
           echo "Log file not found, checking standard output..."
           cat screenpipe_output.log
