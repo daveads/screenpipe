@@ -1,26 +1,32 @@
 name: Linux Integration Test
+
 on:
   push:
     branches: [ cli-test ]
   pull_request:
     branches: [ cli-test ]
+
 jobs:
   test-linux:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
+
     - name: Set up Rust
       uses: actions-rs/toolchain@v1
       with:
         profile: minimal
         toolchain: stable
         override: true
+
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm
+
     - name: Build CLI
       run: cargo build --release
+
     - name: Set up virtual display with window manager
       run: |
         Xvfb :99 -ac -screen 0 1280x1024x24 &
@@ -29,14 +35,18 @@ jobs:
         export DISPLAY=:99
         openbox &
         sleep 3
+        xterm -e "while true; do echo 'Keeping xterm open'; sleep 60; done" &
+        sleep 3
         xdpyinfo || echo "xdpyinfo failed"
         xrandr || echo "xrandr failed"
-        xprop -root _NET_CLIENT_LIST || echo "_NET_CLIENT_LIST not supported"
+        xwininfo -root -children || echo "xwininfo failed"
+
     - name: Set up virtual audio
       run: |
         pulseaudio --start
         pactl load-module module-null-sink sink_name=virtual_speaker
         pactl load-module module-virtual-source source_name=virtual_mic
+
     - name: Run CLI and capture output
       run: |
         export DISPLAY=:99
@@ -45,6 +55,7 @@ jobs:
         SCREENPIPE_PID=$!
         sleep 60
         kill $SCREENPIPE_PID
+
     - name: Check for crashes and expected behavior
       run: |
         echo "Checking for log file..."
@@ -61,8 +72,8 @@ jobs:
             echo "Server did not start correctly"
             exit 1
           fi
-          if grep -q "XCap error occurred: _NET_CLIENT_LIST not supported" "$LOG_FILE"; then
-            echo "XCap error still occurring"
+          if grep -q "No windows found" "$LOG_FILE"; then
+            echo "No windows were detected"
             exit 1
           fi
           echo "CLI ran successfully for 60 seconds without crashing"
@@ -77,12 +88,13 @@ jobs:
             echo "Server did not start correctly"
             exit 1
           fi
-          if grep -q "XCap error occurred: _NET_CLIENT_LIST not supported" screenpipe_output.log; then
-            echo "XCap error still occurring"
+          if grep -q "No windows found" screenpipe_output.log; then
+            echo "No windows were detected"
             exit 1
           fi
           echo "CLI ran successfully for 60 seconds without crashing"
         fi
+
     - name: Upload logs
       uses: actions/upload-artifact@v3
       if: always()
@@ -91,6 +103,7 @@ jobs:
         path: |
           ~/.screenpipe/logs/
           screenpipe_output.log
+
     - name: Upload captured data
       uses: actions/upload-artifact@v3
       if: always()
