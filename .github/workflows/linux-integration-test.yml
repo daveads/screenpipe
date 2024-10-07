@@ -1,5 +1,4 @@
 name: Linux Integration Test
-
 on:
   push:
     branches: [ cli-test ]
@@ -9,7 +8,6 @@ on:
 jobs:
   test-linux:
     runs-on: ubuntu-latest
-    
     steps:
     - uses: actions/checkout@v3
 
@@ -23,15 +21,16 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-apps
 
     - name: Build CLI
       run: cargo build --release
 
     - name: Set up virtual display
       run: |
-        Xvfb :99 -ac &
+        Xvfb :99 -ac -screen 0 1280x1024x24 &
         echo "DISPLAY=:99" >> $GITHUB_ENV
+        sleep 3  # Give Xvfb some time to start
 
     - name: Set up virtual audio
       run: |
@@ -39,16 +38,40 @@ jobs:
         pactl load-module module-null-sink sink_name=virtual_speaker
         pactl load-module module-virtual-source source_name=virtual_mic
 
+    - name: Debug X11 setup
+      run: |
+        xdpyinfo
+        xwininfo -root -children
+
     - name: Run CLI
       run: |
-        timeout 60s ./target/release/screenpipe || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        timeout 60s ./target/release/screenpipe --debug || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
 
-    - name: Check for crashes
+    - name: Check for crashes and errors
       run: |
         if grep -q "panic" ~/.screenpipe/logs/screenpipe.log; then
           echo "CLI crashed"
           cat ~/.screenpipe/logs/screenpipe.log
           exit 1
         fi
+        if grep -q "ERROR" ~/.screenpipe/logs/screenpipe.log; then
+          echo "CLI encountered errors:"
+          grep "ERROR" ~/.screenpipe/logs/screenpipe.log
+          exit 1
+        fi
         echo "CLI ran successfully for 60 seconds without crashing"
         tail -n 50 ~/.screenpipe/logs/screenpipe.log
+
+    - name: Upload logs
+      uses: actions/upload-artifact@v2
+      if: always()
+      with:
+        name: screenpipe-logs
+        path: ~/.screenpipe/logs/
+
+    - name: Upload captured data
+      uses: actions/upload-artifact@v2
+      if: always()
+      with:
+        name: screenpipe-data
+        path: ~/.screenpipe/data/
