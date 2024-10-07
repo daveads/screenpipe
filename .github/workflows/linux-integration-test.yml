@@ -41,7 +41,7 @@ jobs:
 
     - name: Create test image and audio
       run: |
-        convert -size 800x600 xc:white -font Arial -pointsize 24 -draw "text 10,50 'Screenpipe OCR Test'" test_image.png
+        convert -size 800x600 xc:white -font Liberation-Sans -pointsize 24 -draw "text 10,50 'Screenpipe OCR Test'" test_image.png
         ffmpeg -f lavfi -i sine=frequency=1000:duration=5 -ar 16000 test_audio.wav
 
     - name: Display test image and play audio
