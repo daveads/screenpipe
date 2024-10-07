@@ -9,7 +9,6 @@ on:
 jobs:
   test-linux:
     runs-on: ubuntu-latest
-    
     steps:
     - uses: actions/checkout@v3
 
@@ -23,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-utils
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-utils imagemagick
 
     - name: Build CLI
       run: cargo build --release
@@ -32,7 +31,7 @@ jobs:
       run: |
         Xvfb :99 -ac -screen 0 1280x1024x24 &
         echo "DISPLAY=:99" >> $GITHUB_ENV
-        sleep 3  # Give Xvfb some time to start
+        sleep 3
 
     - name: Set up virtual audio
       run: |
@@ -40,13 +39,16 @@ jobs:
         pactl load-module module-null-sink sink_name=virtual_speaker
         pactl load-module module-virtual-source source_name=virtual_mic
 
-    - name: Debug environment
+    - name: Create test image and audio
       run: |
-        echo "Current directory: $(pwd)"
-        echo "Home directory: $HOME"
-        echo "DISPLAY=$DISPLAY"
-        xdpyinfo || echo "xdpyinfo failed"
-        xwininfo -root -tree || echo "xwininfo failed"
+        convert -size 800x600 xc:white -font Arial -pointsize 24 -draw "text 10,50 'Screenpipe OCR Test'" test_image.png
+        ffmpeg -f lavfi -i sine=frequency=1000:duration=5 -ar 16000 test_audio.wav
+
+    - name: Display test image and play audio
+      run: |
+        export DISPLAY=:99
+        eog test_image.png &
+        ffplay -nodisp -autoexit test_audio.wav &
 
     - name: Run CLI and capture output
       run: |
@@ -66,7 +68,23 @@ jobs:
             cat "$LOG_FILE"
             exit 1
           fi
+          if ! grep -q "Server starting on 127.0.0.1:3030" "$LOG_FILE"; then
+            echo "Server did not start correctly"
+            cat "$LOG_FILE"
+            exit 1
+          fi
+          if ! grep -q "Screenpipe OCR Test" "$LOG_FILE"; then
+            echo "OCR did not detect test image text"
+            cat "$LOG_FILE"
+            exit 1
+          fi
+          if ! grep -q "Audio transcription" "$LOG_FILE"; then
+            echo "Audio transcription not detected"
+            cat "$LOG_FILE"
+            exit 1
+          fi
           echo "CLI ran successfully for 60 seconds without crashing"
+          echo "OCR and audio transcription are working as expected"
           tail -n 50 "$LOG_FILE"
         else
           echo "Log file not found, checking standard output..."
