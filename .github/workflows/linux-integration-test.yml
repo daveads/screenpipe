@@ -22,7 +22,13 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev
+
+    - name: Verify Tesseract installation
+      run: |
+        tesseract --version
+        ldconfig -p | grep tesseract
+        ls -l /usr/lib/x86_64-linux-gnu/libtesseract*
 
     - name: Build CLI
       run: cargo build --release
@@ -53,6 +59,8 @@ jobs:
       run: |
         export DISPLAY=:99
         export SCREENPIPE_CAPTURE_METHOD=x11 # Force X11 capture method
+        export PATH=$PATH:/usr/bin  # Ensure /usr/bin is in PATH
+        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/x86_64-linux-gnu  # Add Tesseract library path
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
         sleep 60
@@ -78,6 +86,10 @@ jobs:
             echo "No windows were detected"
             exit 1
           fi
+          if grep -q "tesseract not found" "$LOG_FILE"; then
+            echo "Tesseract OCR not found"
+            exit 1
+          fi
           echo "CLI ran successfully for 60 seconds without crashing"
         else
           echo "Log file not found, checking standard output..."
@@ -92,6 +104,10 @@ jobs:
           fi
           if grep -q "No windows found" screenpipe_output.log; then
             echo "No windows were detected"
+            exit 1
+          fi
+          if grep -q "tesseract not found" screenpipe_output.log; then
+            echo "Tesseract OCR not found"
             exit 1
           fi
           echo "CLI ran successfully for 60 seconds without crashing"
