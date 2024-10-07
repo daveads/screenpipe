@@ -1,107 +1,95 @@
 name: Linux Integration Test
-
 on:
   push:
     branches: [ cli-test ]
   pull_request:
     branches: [ cli-test ]
-
 jobs:
   test-linux:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-
     - name: Set up Rust
       uses: actions-rs/toolchain@v1
       with:
         profile: minimal
         toolchain: stable
         override: true
-
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-utils imagemagick
-
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-utils imagemagick fonts-liberation x11-apps xdotool
     - name: Build CLI
       run: cargo build --release
-
     - name: Set up virtual display
       run: |
         Xvfb :99 -ac -screen 0 1280x1024x24 &
         echo "DISPLAY=:99" >> $GITHUB_ENV
         sleep 3
-
+        export DISPLAY=:99
+        xdpyinfo || echo "xdpyinfo failed"
+        xrandr || echo "xrandr failed"
     - name: Set up virtual audio
       run: |
         pulseaudio --start
         pactl load-module module-null-sink sink_name=virtual_speaker
         pactl load-module module-virtual-source source_name=virtual_mic
-
     - name: Create test image and audio
       run: |
         convert -size 800x600 xc:white -font Liberation-Sans -pointsize 24 -draw "text 10,50 'Screenpipe OCR Test'" test_image.png
         ffmpeg -f lavfi -i sine=frequency=1000:duration=5 -ar 16000 test_audio.wav
-
     - name: Display test image and play audio
       run: |
         export DISPLAY=:99
-        eog test_image.png &
+        xloadimage -onroot -fullscreen test_image.png &
         ffplay -nodisp -autoexit test_audio.wav &
-
+        sleep 5  # Give some time for the image to be displayed
     - name: Run CLI and capture output
       run: |
+        export DISPLAY=:99
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
         sleep 60
         kill $SCREENPIPE_PID
-
     - name: Check for crashes and expected behavior
       run: |
         echo "Checking for log file..."
         LOG_FILE=$(find $HOME -name screenpipe.log)
         if [ -n "$LOG_FILE" ]; then
           echo "Log file found at: $LOG_FILE"
+          echo "Last 100 lines of log:"
+          tail -n 100 "$LOG_FILE"
           if grep -q "panic" "$LOG_FILE"; then
             echo "CLI crashed"
-            cat "$LOG_FILE"
             exit 1
           fi
           if ! grep -q "Server starting on 127.0.0.1:3030" "$LOG_FILE"; then
             echo "Server did not start correctly"
-            cat "$LOG_FILE"
             exit 1
           fi
           if ! grep -q "Screenpipe OCR Test" "$LOG_FILE"; then
             echo "OCR did not detect test image text"
-            cat "$LOG_FILE"
             exit 1
           fi
           if ! grep -q "Audio transcription" "$LOG_FILE"; then
             echo "Audio transcription not detected"
-            cat "$LOG_FILE"
             exit 1
           fi
           echo "CLI ran successfully for 60 seconds without crashing"
           echo "OCR and audio transcription are working as expected"
-          tail -n 50 "$LOG_FILE"
         else
           echo "Log file not found, checking standard output..."
+          cat screenpipe_output.log
           if grep -q "panic" screenpipe_output.log; then
             echo "CLI crashed"
-            cat screenpipe_output.log
             exit 1
           fi
           if ! grep -q "Server starting on 127.0.0.1:3030" screenpipe_output.log; then
             echo "Server did not start correctly"
-            cat screenpipe_output.log
             exit 1
           fi
           echo "CLI ran successfully for 60 seconds without crashing"
-          tail -n 50 screenpipe_output.log
         fi
-
     - name: Upload logs
       uses: actions/upload-artifact@v3
       if: always()
@@ -110,7 +98,6 @@ jobs:
         path: |
           ~/.screenpipe/logs/
           screenpipe_output.log
-
     - name: Upload captured data
       uses: actions/upload-artifact@v3
       if: always()
