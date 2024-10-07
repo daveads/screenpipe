@@ -1,0 +1,54 @@
+name: Linux Integration Test
+
+on:
+  push:
+    branches: [ cli-test ]
+  pull_request:
+    branches: [ cli-test ]
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev
+
+    - name: Build CLI
+      run: cargo build --release
+
+    - name: Set up virtual display
+      run: |
+        Xvfb :99 -ac &
+        echo "DISPLAY=:99" >> $GITHUB_ENV
+
+    - name: Set up virtual audio
+      run: |
+        pulseaudio --start
+        pactl load-module module-null-sink sink_name=virtual_speaker
+        pactl load-module module-virtual-source source_name=virtual_mic
+
+    - name: Run CLI
+      run: |
+        timeout 60s ./target/release/screenpipe || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+
+    - name: Check for crashes
+      run: |
+        if grep -q "panic" ~/.screenpipe/logs/screenpipe.log; then
+          echo "CLI crashed"
+          cat ~/.screenpipe/logs/screenpipe.log
+          exit 1
+        fi
+        echo "CLI ran successfully for 60 seconds without crashing"
+        tail -n 50 ~/.screenpipe/logs/screenpipe.log
