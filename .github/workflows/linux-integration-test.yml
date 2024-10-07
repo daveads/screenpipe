@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation
 
     - name: Build CLI
       run: cargo build --release
@@ -33,9 +33,11 @@ jobs:
         echo "DISPLAY=:99" >> $GITHUB_ENV
         sleep 3
         export DISPLAY=:99
-        openbox &
+        mkdir -p ~/.config/openbox
+        echo '<openbox_config><menu><file>menu.xml</file></menu></openbox_config>' > ~/.config/openbox/rc.xml
+        openbox --config-file ~/.config/openbox/rc.xml &
         sleep 3
-        xterm -e "while true; do echo 'Keeping xterm open'; sleep 60; done" &
+        xterm -fa 'Liberation Mono' -fs 10 -e "while true; do echo 'Keeping xterm open'; sleep 60; done" &
         sleep 3
         xdpyinfo || echo "xdpyinfo failed"
         xrandr || echo "xrandr failed"
