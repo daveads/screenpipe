@@ -21,7 +21,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-apps
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-utils x11-apps
 
     - name: Build CLI
       run: cargo build --release
@@ -40,8 +40,10 @@ jobs:
 
     - name: Debug X11 setup
       run: |
-        xdpyinfo
-        xwininfo -root -children
+        xdpyinfo || echo "xdpyinfo failed"
+        xwininfo -root -children || echo "xwininfo failed"
+        echo "DISPLAY=$DISPLAY"
+        ls -l /tmp/.X11-unix/
 
     - name: Run CLI
       run: |
