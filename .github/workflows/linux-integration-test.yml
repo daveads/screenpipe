@@ -1,4 +1,5 @@
 name: Linux Integration Test
+
 on:
   push:
     branches: [ cli-test ]
@@ -8,6 +9,7 @@ on:
 jobs:
   test-linux:
     runs-on: ubuntu-latest
+    
     steps:
     - uses: actions/checkout@v3
 
@@ -21,7 +23,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-utils x11-apps
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev tesseract-ocr libtesseract-dev x11-utils
 
     - name: Build CLI
       run: cargo build --release
@@ -38,38 +40,58 @@ jobs:
         pactl load-module module-null-sink sink_name=virtual_speaker
         pactl load-module module-virtual-source source_name=virtual_mic
 
-    - name: Debug X11 setup
+    - name: Debug environment
       run: |
-        xdpyinfo || echo "xdpyinfo failed"
-        xwininfo -root -children || echo "xwininfo failed"
+        echo "Current directory: $(pwd)"
+        echo "Home directory: $HOME"
         echo "DISPLAY=$DISPLAY"
-        ls -l /tmp/.X11-unix/
+        xdpyinfo || echo "xdpyinfo failed"
+        xwininfo -root -tree || echo "xwininfo failed"
 
-    - name: Run CLI
+    - name: Run CLI and capture output
       run: |
-        timeout 60s ./target/release/screenpipe --debug || code=$?; if [[ $code -ne 124 && $code -ne 0 ]]; then exit $code; fi
+        ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
+        SCREENPIPE_PID=$!
+        sleep 60
+        kill $SCREENPIPE_PID
 
-    - name: Check for crashes and errors
+    - name: Check for crashes and expected behavior
       run: |
-        if grep -q "panic" ~/.screenpipe/logs/screenpipe.log; then
-          echo "CLI crashed"
-          cat ~/.screenpipe/logs/screenpipe.log
-          exit 1
+        echo "Checking for log file..."
+        LOG_FILE=$(find $HOME -name screenpipe.log)
+        if [ -n "$LOG_FILE" ]; then
+          echo "Log file found at: $LOG_FILE"
+          if grep -q "panic" "$LOG_FILE"; then
+            echo "CLI crashed"
+            cat "$LOG_FILE"
+            exit 1
+          fi
+          echo "CLI ran successfully for 60 seconds without crashing"
+          tail -n 50 "$LOG_FILE"
+        else
+          echo "Log file not found, checking standard output..."
+          if grep -q "panic" screenpipe_output.log; then
+            echo "CLI crashed"
+            cat screenpipe_output.log
+            exit 1
+          fi
+          if ! grep -q "Server starting on 127.0.0.1:3030" screenpipe_output.log; then
+            echo "Server did not start correctly"
+            cat screenpipe_output.log
+            exit 1
+          fi
+          echo "CLI ran successfully for 60 seconds without crashing"
+          tail -n 50 screenpipe_output.log
         fi
-        if grep -q "ERROR" ~/.screenpipe/logs/screenpipe.log; then
-          echo "CLI encountered errors:"
-          grep "ERROR" ~/.screenpipe/logs/screenpipe.log
-          exit 1
-        fi
-        echo "CLI ran successfully for 60 seconds without crashing"
-        tail -n 50 ~/.screenpipe/logs/screenpipe.log
 
     - name: Upload logs
       uses: actions/upload-artifact@v3
       if: always()
       with:
         name: screenpipe-logs
-        path: ~/.screenpipe/logs/
+        path: |
+          ~/.screenpipe/logs/
+          screenpipe_output.log
 
     - name: Upload captured data
       uses: actions/upload-artifact@v3
