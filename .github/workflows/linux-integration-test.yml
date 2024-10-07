@@ -63,14 +63,14 @@ jobs:
         tail -n 50 ~/.screenpipe/logs/screenpipe.log
 
     - name: Upload logs
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       if: always()
       with:
         name: screenpipe-logs
         path: ~/.screenpipe/logs/
 
     - name: Upload captured data
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       if: always()
       with:
         name: screenpipe-data
