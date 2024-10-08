@@ -51,12 +51,15 @@ jobs:
 
     - name: Set up virtual audio
       run: |
-        sudo modprobe snd-aloop
-        aplay -l
-        echo ".alsarc" > ~/.asoundrc
-        echo "pcm.!default { type plug slave.pcm \"hw:Loopback,0,0\" }" >> ~/.asoundrc
-        echo "ctl.!default { type hw card 0 }" >> ~/.asoundrc
+        echo "pcm.!default {
+          type null
+        }
+        
+        ctl.!default {
+          type null
+        }" > ~/.asoundrc
         cat ~/.asoundrc
+        aplay -l
 
     - name: Run CLI and capture output
       run: |
@@ -105,8 +108,8 @@ jobs:
         # Generate audio file with speech
         echo "Hello from screenpipe" | text2wave -scale 5 -F 48000 -o speech.wav
         
-        # Play the audio file through the virtual audio device
-        aplay speech.wav
+        # Simulate playing the audio file (it won't actually produce sound)
+        aplay -D null speech.wav
         
         # Wait for transcription to complete
         sleep 15
