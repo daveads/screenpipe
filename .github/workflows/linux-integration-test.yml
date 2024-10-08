@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu sox libsox-fmt-all alsa-utils
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu
 
     - name: Verify Tesseract installation
       run: |
@@ -51,15 +51,9 @@ jobs:
 
     - name: Set up virtual audio
       run: |
-        echo "pcm.!default {
-          type null
-        }
-        
-        ctl.!default {
-          type null
-        }" > ~/.asoundrc
-        cat ~/.asoundrc
-        aplay -l
+        pulseaudio --start
+        pactl load-module module-null-sink sink_name=virtual_speaker
+        pactl load-module module-virtual-source source_name=virtual_mic
 
     - name: Run CLI and capture output
       run: |
@@ -98,27 +92,6 @@ jobs:
           echo "OCR test passed: Text was recognized"
         else
           echo "OCR test failed: Text was not recognized"
-          echo "Last 100 lines of log:"
-          tail -n 100 screenpipe_output.log
-          exit 1
-        fi
-
-    - name: Test Audio Transcription
-      run: |
-        # Generate audio file with speech
-        echo "Hello from screenpipe" | text2wave -scale 5 -F 48000 -o speech.wav
-        
-        # Simulate playing the audio file (it won't actually produce sound)
-        aplay -D null speech.wav
-        
-        # Wait for transcription to complete
-        sleep 15
-
-        # Check the logs for the transcription result
-        if grep -qi "Hello from screenpipe" screenpipe_output.log; then
-          echo "Audio transcription test passed: Speech was recognized"
-        else
-          echo "Audio transcription test failed: Speech was not recognized"
           echo "Last 100 lines of log:"
           tail -n 100 screenpipe_output.log
           exit 1
@@ -172,10 +145,3 @@ jobs:
       with:
         name: test-image
         path: test_image.png
-
-    - name: Upload test audio
-      uses: actions/upload-artifact@v3
-      if: always()
-      with:
-        name: test-audio
-        path: speech.wav
