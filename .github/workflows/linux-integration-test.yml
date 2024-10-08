@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu sox libsox-fmt-all
 
     - name: Verify Tesseract installation
       run: |
@@ -64,7 +64,7 @@ jobs:
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
         echo $SCREENPIPE_PID > screenpipe.pid
-        sleep 30  # Let screenpipe initialize
+        sleep 60  # Let screenpipe run for 60 seconds
 
     - name: Test OCR
       run: |
@@ -73,25 +73,55 @@ jobs:
 
         # Create a test image with known text using a standard font
         convert -size 300x100 xc:white -font DejaVu-Sans -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
-        
+
         # Display the image
         DISPLAY=:99 display test_image.png &
         DISPLAY_PID=$!
-        
+
         # Give some time for screenpipe to capture and process the image
         sleep 20
-        
+
         # Kill the display process
         kill $DISPLAY_PID
-        
+
         # Wait a bit for processing to complete
         sleep 10
-        
+
         # Check the logs for the OCR result
         if grep -qi "Hello, Screenpipe OCR" screenpipe_output.log; then
           echo "OCR test passed: Text was recognized"
         else
           echo "OCR test failed: Text was not recognized"
+          echo "Last 100 lines of log:"
+          tail -n 100 screenpipe_output.log
+          exit 1
+        fi
+
+    - name: Test Audio Transcription
+      run: |
+        # Generate a test audio file with known speech
+        sox -n test_audio.wav synth 3 sine 1000 vol 0.5 & \
+        sox -n speech.wav synth 3 sine 1000 vol 0 & \
+        echo "Hello Screenpipe transcription" | \
+        sed 's/.*/"&"/' | \
+        while read line; do \
+          echo "$line"; \
+          sleep 1; \
+        done | \
+        text2wave -scale 5 -o speech.wav
+        sox test_audio.wav speech.wav test_audio_with_speech.wav
+
+        # Play the audio file through the virtual audio device
+        paplay --device=virtual_speaker test_audio_with_speech.wav &
+
+        # Give some time for screenpipe to capture and process the audio
+        sleep 20
+
+        # Check the logs for the transcription result
+        if grep -qi "Hello Screenpipe transcription" screenpipe_output.log; then
+          echo "Audio transcription test passed: Speech was recognized"
+        else
+          echo "Audio transcription test failed: Speech was not recognized"
           echo "Last 100 lines of log:"
           tail -n 100 screenpipe_output.log
           exit 1
@@ -145,3 +175,10 @@ jobs:
       with:
         name: test-image
         path: test_image.png
+
+    - name: Upload test audio
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-audio
+        path: test_audio_with_speech.wav
