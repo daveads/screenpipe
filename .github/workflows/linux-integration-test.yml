@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu alsa-utils
+        sudo apt-get install -y xvfb ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu alsa-utils pulseaudio pulseaudio-utils
 
     - name: Verify Tesseract installation
       run: |
@@ -49,21 +49,24 @@ jobs:
         xrandr || echo "xrandr failed"
         xwininfo -root -children || echo "xwininfo failed"
 
-    - name: Set up ALSA null sound device
+    - name: Setup audio
       run: |
-        echo "
-        pcm.!default {
-          type null
-        }
-        ctl.!default {
-          type null
-        }
-        " | sudo tee /etc/asound.conf
-        aplay -l
-        arecord -l
+        pulseaudio --start
+        sleep 2
+        pactl load-module module-null-sink sink_name=virtual_speaker
+        pactl set-default-sink virtual_speaker
+        pactl load-module module-virtual-source source_name=virtual_mic master=virtual_speaker.monitor
+        pactl set-default-source virtual_mic
+        sleep 5
+        
+        # Verify audio setup
+        pactl list short sinks
+        pactl list short sources
+        pactl info
 
     - name: Run Screenpipe
       run: |
+        export PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
         echo $SCREENPIPE_PID > screenpipe.pid
@@ -100,7 +103,7 @@ jobs:
         ls -l .github/scripts/audio_test.wav
         
         echo "Playing audio file..."
-        aplay .github/scripts/audio_test.wav
+        paplay --device=virtual_speaker .github/scripts/audio_test.wav
         
         echo "Waiting for audio to be processed..."
         sleep 30
