@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu alsa-utils pipewire pipewire-pulse wireplumber
+        sudo apt-get install -y xvfb ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu alsa-utils
 
     - name: Verify Tesseract installation
       run: |
@@ -49,32 +49,15 @@ jobs:
         xrandr || echo "xrandr failed"
         xwininfo -root -children || echo "xwininfo failed"
 
-    - name: Set up PipeWire
+    - name: Set up ALSA loopback device
       run: |
-        # Start PipeWire manually
-        pipewire &
-        sleep 2
-        pipewire-pulse &
-        sleep 2
-        wireplumber &
-        sleep 5
-
-        # Create a virtual sink
-        pactl load-module module-null-sink sink_name=virtual_sink
-        
-        # Set the default sink
-        pactl set-default-sink virtual_sink
-        
-        # List audio devices to verify setup
-        pactl list short sinks
-        pactl list short sources
-
-        # Verify PipeWire is running
-        ps aux | grep pipewire
-        ps aux | grep wireplumber
+        sudo modprobe snd-aloop
+        aplay -l
+        arecord -l
 
     - name: Run Screenpipe
       run: |
+        export AUDIODEV=hw:Loopback,1
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
         echo $SCREENPIPE_PID > screenpipe.pid
@@ -111,7 +94,7 @@ jobs:
         ls -l .github/scripts/audio_test.wav
         
         echo "Playing audio file..."
-        paplay --device=virtual_sink .github/scripts/audio_test.wav
+        aplay -D hw:Loopback,1,0 .github/scripts/audio_test.wav
         
         echo "Waiting for audio to be processed..."
         sleep 30
