@@ -63,6 +63,7 @@ jobs:
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/x86_64-linux-gnu  # Add Tesseract library path
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
+        echo $SCREENPIPE_PID > screenpipe.pid
         sleep 30  # Let screenpipe initialize
 
     - name: Test OCR
@@ -87,75 +88,49 @@ jobs:
         sleep 10
         
         # Check the logs for the OCR result
-        if grep -qi "Hello, Screenpipe OCR" ~/.screenpipe/logs/screenpipe.log; then
+        if grep -qi "Hello, Screenpipe OCR" screenpipe_output.log; then
           echo "OCR test passed: Text was recognized"
         else
           echo "OCR test failed: Text was not recognized"
           echo "Last 100 lines of log:"
-          tail -n 100 ~/.screenpipe/logs/screenpipe.log
+          tail -n 100 screenpipe_output.log
           exit 1
         fi
 
     - name: Stop screenpipe
       run: |
-        kill $SCREENPIPE_PID
+        kill $(cat screenpipe.pid)
         sleep 5  # Give time for graceful shutdown
 
     - name: Check for crashes and expected behavior
       run: |
-        echo "Checking for log file..."
-        LOG_FILE=$(find $HOME -name screenpipe.log)
-        if [ -n "$LOG_FILE" ]; then
-          echo "Log file found at: $LOG_FILE"
-          echo "Last 100 lines of log:"
-          tail -n 100 "$LOG_FILE"
-          if grep -q "panic" "$LOG_FILE"; then
-            echo "CLI crashed"
-            exit 1
-          fi
-          if ! grep -q "Server starting on 127.0.0.1:3030" "$LOG_FILE"; then
-            echo "Server did not start correctly"
-            exit 1
-          fi
-          if grep -q "No windows found" "$LOG_FILE"; then
-            echo "No windows were detected"
-            exit 1
-          fi
-          if grep -q "tesseract not found" "$LOG_FILE"; then
-            echo "Tesseract OCR not found"
-            exit 1
-          fi
-          echo "CLI ran successfully without crashing"
-        else
-          echo "Log file not found, checking standard output..."
-          cat screenpipe_output.log
-          if grep -q "panic" screenpipe_output.log; then
-            echo "CLI crashed"
-            exit 1
-          fi
-          if ! grep -q "Server starting on 127.0.0.1:3030" screenpipe_output.log; then
-            echo "Server did not start correctly"
-            exit 1
-          fi
-          if grep -q "No windows found" screenpipe_output.log; then
-            echo "No windows were detected"
-            exit 1
-          fi
-          if grep -q "tesseract not found" screenpipe_output.log; then
-            echo "Tesseract OCR not found"
-            exit 1
-          fi
-          echo "CLI ran successfully without crashing"
+        echo "Checking log file..."
+        echo "Last 100 lines of log:"
+        tail -n 100 screenpipe_output.log
+        if grep -q "panic" screenpipe_output.log; then
+          echo "CLI crashed"
+          exit 1
         fi
+        if ! grep -q "Server starting on 127.0.0.1:3030" screenpipe_output.log; then
+          echo "Server did not start correctly"
+          exit 1
+        fi
+        if grep -q "No windows found" screenpipe_output.log; then
+          echo "No windows were detected"
+          exit 1
+        fi
+        if grep -q "tesseract not found" screenpipe_output.log; then
+          echo "Tesseract OCR not found"
+          exit 1
+        fi
+        echo "CLI ran successfully without crashing"
 
     - name: Upload logs
       uses: actions/upload-artifact@v3
       if: always()
       with:
         name: screenpipe-logs
-        path: |
-          ~/.screenpipe/logs/
-          screenpipe_output.log
+        path: screenpipe_output.log
 
     - name: Upload captured data
       uses: actions/upload-artifact@v3
