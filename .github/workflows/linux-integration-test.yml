@@ -93,15 +93,32 @@ jobs:
 
     - name: Test Audio Capture
       run: |
+        echo "Checking PulseAudio status..."
+        pulseaudio --check || (echo "PulseAudio is not running. Starting it now..."; pulseaudio --start)
+        
+        echo "Waiting for PulseAudio to be fully operational..."
+        sleep 5
+        
+        echo "Listing audio devices..."
+        pactl list short sinks
+        pactl list short sources
+        
         echo "Playing audio file..."
-        paplay --device=virtual_speaker .github/scripts/audio_test.wav &
+        if paplay --device=virtual_speaker .github/scripts/audio_test.wav; then
+          echo "Audio file played successfully"
+        else
+          echo "Failed to play audio file"
+          exit 1
+        fi
 
         echo "Waiting for audio to be processed..."
         sleep 30
 
         echo "Checking logs for audio result..."
-        if grep -qi "human world" screenpipe_output.log || grep -qi "audio" screenpipe_output.log; then
-          echo "Audio capture test passed: 'human world' or audio-related output found in logs"
+        if grep -qi "human world" screenpipe_output.log; then
+          echo "Audio capture test passed: 'human world' found in logs"
+        elif grep -qi "audio" screenpipe_output.log; then
+          echo "Audio capture test partially passed: Audio-related output found in logs, but not the specific phrase"
         else
           echo "Audio capture test failed: Neither 'human world' nor audio-related output found in logs"
           echo "Last 100 lines of log:"
