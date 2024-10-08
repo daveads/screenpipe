@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu alsa-utils
+        sudo apt-get install -y xvfb ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu alsa-utils pipewire pipewire-pulse wireplumber
 
     - name: Verify Tesseract installation
       run: |
@@ -49,30 +49,26 @@ jobs:
         xrandr || echo "xrandr failed"
         xwininfo -root -children || echo "xwininfo failed"
 
-    - name: Set up audio
+    - name: Set up PipeWire
       run: |
-        # Kill any existing PulseAudio processes
-        pulseaudio --kill || true
+        # Start PipeWire and related services
+        systemctl --user start pipewire pipewire-pulse wireplumber
         
-        # Start PulseAudio in the background
-        pulseaudio --start --exit-idle-time=-1 --daemon
-        
-        # Wait for PulseAudio to fully start
+        # Wait for PipeWire to fully start
         sleep 5
         
-        # Load the null sink module
-        pactl load-module module-null-sink sink_name=virtual_speaker
+        # Create a virtual sink
+        pw-cli create-node adapter { factory.name=support.null-audio-sink node.name=virtual_sink media.class=Audio/Sink }
         
         # Set the default sink
-        pactl set-default-sink virtual_speaker
+        wpctl set-default $(wpctl status | grep virtual_sink | awk '{print $2}')
         
         # List audio devices to verify setup
-        pactl list short sinks
-        pactl list short sources
+        pw-cli ls Node
+        wpctl status
 
     - name: Run Screenpipe
       run: |
-        export PULSE_SERVER=unix:/run/user/$(id -u)/pulse/native
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
         echo $SCREENPIPE_PID > screenpipe.pid
@@ -109,7 +105,7 @@ jobs:
         ls -l .github/scripts/audio_test.wav
         
         echo "Playing audio file..."
-        paplay --device=virtual_speaker .github/scripts/audio_test.wav
+        pw-play .github/scripts/audio_test.wav
         
         echo "Waiting for audio to be processed..."
         sleep 30
