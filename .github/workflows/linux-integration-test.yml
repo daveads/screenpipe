@@ -1,4 +1,4 @@
-name: Linux Integration Test - OCR Focus
+name: Linux Integration Test
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [ cli-test ]
 
 jobs:
-  test-linux-ocr:
+  test-linux:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
@@ -24,6 +24,12 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick
 
+    - name: Verify Tesseract installation
+      run: |
+        tesseract --version
+        ldconfig -p | grep tesseract
+        ls -l /usr/lib/x86_64-linux-gnu/libtesseract*
+
     - name: Build CLI
       run: cargo build --release
 
@@ -33,50 +39,73 @@ jobs:
         echo "DISPLAY=:99" >> $GITHUB_ENV
         sleep 3
         export DISPLAY=:99
-        openbox &
+        mkdir -p ~/.config/openbox
+        echo '<openbox_config><menu><file>menu.xml</file></menu></openbox_config>' > ~/.config/openbox/rc.xml
+        openbox --config-file ~/.config/openbox/rc.xml &
         sleep 3
+        xterm -fa 'Liberation Mono' -fs 10 -e "while true; do echo 'Keeping xterm open'; sleep 60; done" &
+        sleep 3
+        xdpyinfo || echo "xdpyinfo failed"
+        xrandr || echo "xrandr failed"
+        xwininfo -root -children || echo "xwininfo failed"
 
-    - name: Prepare OCR test image
+    - name: Set up virtual audio
+      run: |
+        pulseaudio --start
+        pactl load-module module-null-sink sink_name=virtual_speaker
+        pactl load-module module-virtual-source source_name=virtual_mic
+
+    - name: Run CLI and capture output
       run: |
         export DISPLAY=:99
-        convert -size 800x600 xc:white -font Liberation-Sans -pointsize 72 -fill black -gravity center -draw "text 0,0 'Screenpipe OCR Test'" ocr_test.png
-        display -window root ocr_test.png
-
-    - name: Run Screenpipe
-      run: |
-        export DISPLAY=:99
-        export SCREENPIPE_CAPTURE_METHOD=x11
-        export PATH=$PATH:/usr/bin
-        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/x86_64-linux-gnu
+        export SCREENPIPE_CAPTURE_METHOD=x11 # Force X11 capture method
+        export PATH=$PATH:/usr/bin  # Ensure /usr/bin is in PATH
+        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/x86_64-linux-gnu  # Add Tesseract library path
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
-        sleep 60  # Run for 1 minute to ensure capture of OCR
-        kill $SCREENPIPE_PID
+        sleep 30  # Let screenpipe initialize
 
-    - name: Test OCR functionality
+    - name: Test OCR
       run: |
+        # Create a test image with known text
+        convert -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
+        
+        # Display the image
+        DISPLAY=:99 display test_image.png &
+        DISPLAY_PID=$!
+        
+        # Give some time for screenpipe to capture and process the image
+        sleep 20
+        
+        # Kill the display process
+        kill $DISPLAY_PID
+        
+        # Wait a bit for processing to complete
+        sleep 10
+        
+        # Check the logs for the OCR result
+        if grep -qi "Hello, Screenpipe OCR" ~/.screenpipe/logs/screenpipe.log; then
+          echo "OCR test passed: Text was recognized"
+        else
+          echo "OCR test failed: Text was not recognized"
+          echo "Last 100 lines of log:"
+          tail -n 100 ~/.screenpipe/logs/screenpipe.log
+          exit 1
+        fi
+
+    - name: Stop screenpipe
+      run: |
+        kill $SCREENPIPE_PID
+        sleep 5  # Give time for graceful shutdown
+
+    - name: Check for crashes and expected behavior
+      run: |
+        echo "Checking for log file..."
         LOG_FILE=$(find $HOME -name screenpipe.log)
         if [ -n "$LOG_FILE" ]; then
           echo "Log file found at: $LOG_FILE"
           echo "Last 100 lines of log:"
           tail -n 100 "$LOG_FILE"
-          if grep -i "screenpipe ocr test" "$LOG_FILE"; then
-            echo "OCR test passed: Text detected successfully"
-          else
-            echo "OCR test failed: Text not detected"
-            echo "Full log content:"
-            cat "$LOG_FILE"
-            exit 1
-          fi
-        else
-          echo "Log file not found"
-          exit 1
-        fi
-
-    - name: Check for crashes and overall behavior
-      run: |
-        LOG_FILE=$(find $HOME -name screenpipe.log)
-        if [ -n "$LOG_FILE" ]; then
           if grep -q "panic" "$LOG_FILE"; then
             echo "CLI crashed"
             exit 1
@@ -85,10 +114,35 @@ jobs:
             echo "Server did not start correctly"
             exit 1
           fi
+          if grep -q "No windows found" "$LOG_FILE"; then
+            echo "No windows were detected"
+            exit 1
+          fi
+          if grep -q "tesseract not found" "$LOG_FILE"; then
+            echo "Tesseract OCR not found"
+            exit 1
+          fi
           echo "CLI ran successfully without crashing"
         else
-          echo "Log file not found"
-          exit 1
+          echo "Log file not found, checking standard output..."
+          cat screenpipe_output.log
+          if grep -q "panic" screenpipe_output.log; then
+            echo "CLI crashed"
+            exit 1
+          fi
+          if ! grep -q "Server starting on 127.0.0.1:3030" screenpipe_output.log; then
+            echo "Server did not start correctly"
+            exit 1
+          fi
+          if grep -q "No windows found" screenpipe_output.log; then
+            echo "No windows were detected"
+            exit 1
+          fi
+          if grep -q "tesseract not found" screenpipe_output.log; then
+            echo "Tesseract OCR not found"
+            exit 1
+          fi
+          echo "CLI ran successfully without crashing"
         fi
 
     - name: Upload logs
@@ -106,3 +160,10 @@ jobs:
       with:
         name: screenpipe-data
         path: ~/.screenpipe/data/
+
+    - name: Upload test image
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-image
+        path: test_image.png
