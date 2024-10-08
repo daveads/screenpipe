@@ -52,10 +52,13 @@ jobs:
     - name: Set up virtual audio
       run: |
         pulseaudio --start
-        pactl load-module module-null-sink sink_name=virtual_speaker
-        pactl load-module module-virtual-source source_name=virtual_mic
-        pactl set-default-source virtual_mic
-        pactl set-default-sink virtual_speaker
+        sleep 2
+        pacmd load-module module-null-sink sink_name=virtual_speaker
+        pacmd load-module module-virtual-source source_name=virtual_mic master=virtual_speaker.monitor
+        pacmd set-default-source virtual_mic
+        pacmd set-default-sink virtual_speaker
+        pactl list short sinks
+        pactl list short sources
 
     - name: Run CLI and capture output
       run: |
@@ -106,7 +109,7 @@ jobs:
         
         # Play the audio file through the virtual audio device
         paplay --device=virtual_speaker speech.wav
-
+        
         # Wait for transcription to complete
         sleep 15
 
