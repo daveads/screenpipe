@@ -51,21 +51,32 @@ jobs:
 
     - name: Setup audio
       run: |
-        pulseaudio --start
+        # Kill any existing PulseAudio processes
+        pulseaudio --kill || true
         sleep 2
+
+        # Start PulseAudio in daemon mode
+        pulseaudio --start --log-target=syslog --system=false --disallow-exit --exit-idle-time=-1 --daemon
+
+        sleep 5
+
+        # Load modules and set default devices
         pactl load-module module-null-sink sink_name=virtual_speaker
         pactl set-default-sink virtual_speaker
         pactl load-module module-virtual-source source_name=virtual_mic master=virtual_speaker.monitor
         pactl set-default-source virtual_mic
-        sleep 5
-        
+
         # Verify audio setup
         pactl list short sinks
         pactl list short sources
         pactl info
 
+        # Check PulseAudio socket
+        ls -l /run/user/$(id -u)/pulse/
+
     - name: Run Screenpipe
       run: |
+        export XDG_RUNTIME_DIR=/run/user/$(id -u)
         export PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
@@ -102,8 +113,18 @@ jobs:
         echo "Verifying audio file exists..."
         ls -l .github/scripts/audio_test.wav
         
+        echo "PulseAudio status:"
+        pulseaudio --check
+        echo $?
+        
+        echo "PulseAudio processes:"
+        ps aux | grep pulseaudio
+        
+        echo "PulseAudio socket:"
+        ls -l /run/user/$(id -u)/pulse/
+        
         echo "Playing audio file..."
-        paplay --device=virtual_speaker .github/scripts/audio_test.wav
+        PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native paplay --verbose .github/scripts/audio_test.wav
         
         echo "Waiting for audio to be processed..."
         sleep 30
