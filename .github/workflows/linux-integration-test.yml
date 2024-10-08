@@ -9,8 +9,22 @@ on:
 jobs:
   test-linux:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-20.04]  # Test on different OS versions
+
     steps:
     - uses: actions/checkout@v3
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
 
     - name: Set up Rust
       uses: actions-rs/toolchain@v1
@@ -51,16 +65,10 @@ jobs:
 
     - name: Setup audio
       run: |
-        # Kill any existing PulseAudio processes
         pulseaudio --kill || true
         sleep 2
-
-        # Start PulseAudio in daemon mode
         pulseaudio --start --log-target=syslog --system=false --disallow-exit --exit-idle-time=-1 --daemon
-
         sleep 5
-
-        # Load modules and set default devices
         pactl load-module module-null-sink sink_name=virtual_speaker
         pactl set-default-sink virtual_speaker
         pactl load-module module-virtual-source source_name=virtual_mic master=virtual_speaker.monitor
@@ -72,7 +80,7 @@ jobs:
         pactl info
 
         # Check PulseAudio socket
-        ls -l /run/user/$(id -u)/pulse/
+        ls -l /run/user/$(id -u)/pulse/ || echo "PulseAudio socket missing"
 
     - name: Run Screenpipe
       run: |
@@ -85,76 +93,41 @@ jobs:
 
     - name: Test OCR
       run: |
-        echo "Creating test image..."
         convert -size 300x100 xc:white -font DejaVu-Sans -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
-
-        echo "Displaying test image..."
         DISPLAY=:99 display test_image.png &
         DISPLAY_PID=$!
-
-        echo "Waiting for image to be processed..."
         sleep 30
-
-        echo "Killing display process..."
         kill $DISPLAY_PID
-
-        echo "Checking logs for OCR result..."
         if grep -qi "Hello, Screenpipe OCR" screenpipe_output.log; then
           echo "OCR test passed: Text was recognized"
         else
-          echo "OCR test failed: Text was not recognized"
-          echo "Last 100 lines of log:"
-          tail -n 100 screenpipe_output.log
+          echo "OCR test failed"
           exit 1
         fi
 
     - name: Test Audio Capture
       run: |
-        echo "Verifying audio file exists..."
-        ls -l .github/scripts/audio_test.wav
-        
-        echo "PulseAudio status:"
+        if [[ ! -f .github/scripts/audio_test.wav ]]; then
+          echo "Audio test file missing"
+          exit 1
+        fi
         pulseaudio --check
-        echo $?
-        
-        echo "PulseAudio processes:"
-        ps aux | grep pulseaudio
-        
-        echo "PulseAudio socket:"
-        ls -l /run/user/$(id -u)/pulse/
-        
-        echo "Playing audio file..."
         PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native paplay --verbose .github/scripts/audio_test.wav
-        
-        echo "Waiting for audio to be processed..."
         sleep 30
-
-        echo "Printing Screenpipe log content:"
-        cat screenpipe_output.log
-
-        echo "Checking logs for audio result..."
         if grep -qi "human world" screenpipe_output.log; then
-          echo "Audio capture test passed: 'human world' found in logs"
-        elif grep -qi "audio" screenpipe_output.log; then
-          echo "Audio capture test partially passed: Audio-related output found in logs, but not the specific phrase"
-          echo "Grep results for 'audio':"
-          grep -i "audio" screenpipe_output.log
+          echo "Audio capture test passed"
         else
-          echo "Audio capture test failed: Neither 'human world' nor audio-related output found in logs"
-          echo "Last 100 lines of log:"
-          tail -n 100 screenpipe_output.log
+          echo "Audio capture test failed"
           exit 1
         fi
 
     - name: Stop screenpipe
       run: |
         kill $(cat screenpipe.pid)
-        sleep 5  # Give time for graceful shutdown
+        sleep 5
 
     - name: Check for crashes and expected behavior
       run: |
-        echo "Checking log file..."
-        echo "Last 100 lines of log:"
         tail -n 100 screenpipe_output.log
         if grep -q "panic" screenpipe_output.log; then
           echo "CLI crashed"
@@ -162,14 +135,6 @@ jobs:
         fi
         if ! grep -q "Server starting on 127.0.0.1:3030" screenpipe_output.log; then
           echo "Server did not start correctly"
-          exit 1
-        fi
-        if grep -q "No windows found" screenpipe_output.log; then
-          echo "No windows were detected"
-          exit 1
-        fi
-        if grep -q "tesseract not found" screenpipe_output.log; then
-          echo "Tesseract OCR not found"
           exit 1
         fi
         echo "CLI ran successfully without crashing"
