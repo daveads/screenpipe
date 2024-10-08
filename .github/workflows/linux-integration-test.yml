@@ -51,21 +51,27 @@ jobs:
 
     - name: Set up PipeWire
       run: |
-        # Start PipeWire and related services
-        systemctl --user start pipewire pipewire-pulse wireplumber
-        
-        # Wait for PipeWire to fully start
+        # Start PipeWire manually
+        pipewire &
+        sleep 2
+        pipewire-pulse &
+        sleep 2
+        wireplumber &
         sleep 5
-        
+
         # Create a virtual sink
-        pw-cli create-node adapter { factory.name=support.null-audio-sink node.name=virtual_sink media.class=Audio/Sink }
+        pactl load-module module-null-sink sink_name=virtual_sink
         
         # Set the default sink
-        wpctl set-default $(wpctl status | grep virtual_sink | awk '{print $2}')
+        pactl set-default-sink virtual_sink
         
         # List audio devices to verify setup
-        pw-cli ls Node
-        wpctl status
+        pactl list short sinks
+        pactl list short sources
+
+        # Verify PipeWire is running
+        ps aux | grep pipewire
+        ps aux | grep wireplumber
 
     - name: Run Screenpipe
       run: |
@@ -105,7 +111,7 @@ jobs:
         ls -l .github/scripts/audio_test.wav
         
         echo "Playing audio file..."
-        pw-play .github/scripts/audio_test.wav
+        paplay --device=virtual_sink .github/scripts/audio_test.wav
         
         echo "Waiting for audio to be processed..."
         sleep 30
