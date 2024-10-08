@@ -49,15 +49,21 @@ jobs:
         xrandr || echo "xrandr failed"
         xwininfo -root -children || echo "xwininfo failed"
 
-    - name: Set up ALSA loopback device
+    - name: Set up ALSA null sound device
       run: |
-        sudo modprobe snd-aloop
+        echo "
+        pcm.!default {
+          type null
+        }
+        ctl.!default {
+          type null
+        }
+        " | sudo tee /etc/asound.conf
         aplay -l
         arecord -l
 
     - name: Run Screenpipe
       run: |
-        export AUDIODEV=hw:Loopback,1
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
         echo $SCREENPIPE_PID > screenpipe.pid
@@ -94,7 +100,7 @@ jobs:
         ls -l .github/scripts/audio_test.wav
         
         echo "Playing audio file..."
-        aplay -D hw:Loopback,1,0 .github/scripts/audio_test.wav
+        aplay .github/scripts/audio_test.wav
         
         echo "Waiting for audio to be processed..."
         sleep 30
