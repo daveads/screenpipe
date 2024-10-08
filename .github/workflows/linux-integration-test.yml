@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu sox libsox-fmt-all festival
+        sudo apt-get install -y xvfb ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu sox libsox-fmt-all alsa-utils
 
     - name: Verify Tesseract installation
       run: |
@@ -51,14 +51,12 @@ jobs:
 
     - name: Set up virtual audio
       run: |
-        pulseaudio --start
-        sleep 2
-        pacmd load-module module-null-sink sink_name=virtual_speaker
-        pacmd load-module module-virtual-source source_name=virtual_mic master=virtual_speaker.monitor
-        pacmd set-default-source virtual_mic
-        pacmd set-default-sink virtual_speaker
-        pactl list short sinks
-        pactl list short sources
+        sudo modprobe snd-aloop
+        aplay -l
+        echo ".alsarc" > ~/.asoundrc
+        echo "pcm.!default { type plug slave.pcm \"hw:Loopback,0,0\" }" >> ~/.asoundrc
+        echo "ctl.!default { type hw card 0 }" >> ~/.asoundrc
+        cat ~/.asoundrc
 
     - name: Run CLI and capture output
       run: |
@@ -108,7 +106,7 @@ jobs:
         echo "Hello from screenpipe" | text2wave -scale 5 -F 48000 -o speech.wav
         
         # Play the audio file through the virtual audio device
-        paplay --device=virtual_speaker speech.wav
+        aplay speech.wav
         
         # Wait for transcription to complete
         sleep 15
