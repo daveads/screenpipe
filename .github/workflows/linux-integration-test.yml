@@ -46,9 +46,6 @@ jobs:
     - name: Stop screenpipe
       run: .github/scripts/stop_screenpipe.sh
     
-    - name: Analyze Screenpipe database
-      run: .github/scripts/analyze_database.sh
-    
     - name: Check for crashes and expected behavior
       run: .github/scripts/check_logs.sh
     
