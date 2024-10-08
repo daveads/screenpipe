@@ -49,14 +49,15 @@ jobs:
       run: |
         magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
 
-    - name: Prepare audio test file
+    - name: Verify audio file
       shell: pwsh
       run: |
-        Add-Type -AssemblyName System.Speech
-        $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-        $synth.SetOutputToWaveFile("test_audio.wav")
-        $synth.Speak("This is a test for Screenpipe audio capture")
-        $synth.Dispose()
+        if (Test-Path ".github\scripts\audio_test.wav") {
+          Write-Host "Audio test file found"
+        } else {
+          Write-Host "Audio test file not found"
+          exit 1
+        }
 
     - name: Run CLI and capture output
       shell: pwsh
@@ -70,7 +71,7 @@ jobs:
         Start-Sleep -Seconds 20
         
         # Play audio test file
-        (New-Object Media.SoundPlayer "test_audio.wav").PlaySync()
+        (New-Object Media.SoundPlayer ".github\scripts\audio_test.wav").PlaySync()
         Start-Sleep -Seconds 30
         
         Stop-Process -Id $process.Id -Force
@@ -99,10 +100,10 @@ jobs:
           }
           
           # Check for audio capture result
-          if (Select-String -Path $LogFile -Pattern "test for Screenpipe audio capture" -Quiet) {
-            Write-Host "Audio capture test passed: Text was transcribed"
+          if (Select-String -Path $LogFile -Pattern "human world" -Quiet) {
+            Write-Host "Audio capture test passed: Expected phrase was transcribed"
           } else {
-            Write-Host "Audio capture test failed: Text was not transcribed"
+            Write-Host "Audio capture test failed: Expected phrase was not transcribed"
             exit 1
           }
         } else {
@@ -136,4 +137,4 @@ jobs:
         name: test-files
         path: |
           test_image.png
-          test_audio.wav
+          .github\scripts\audio_test.wav
