@@ -32,6 +32,7 @@ jobs:
         ffmpeg -version
         tesseract --version
         magick -version
+        tesseract --list-langs
 
     - name: Build CLI
       run: cargo build --release
@@ -43,11 +44,19 @@ jobs:
         Write-Host "User profile: $env:USERPROFILE"
         Get-WmiObject -Class Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion
         Write-Host "PATH: $env:PATH"
+        Write-Host "Tesseract location: $(Get-Command tesseract).Path"
 
     - name: Prepare OCR test image
       shell: pwsh
       run: |
-        magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
+        magick -size 600x200 xc:white -font Arial -pointsize 48 -fill black -draw "text 20,100 'Hello, Screenpipe OCR'" test_image.png
+        if (Test-Path test_image.png) {
+          Write-Host "Test image created successfully"
+          magick identify test_image.png
+        } else {
+          Write-Host "Failed to create test image"
+          exit 1
+        }
 
     - name: Verify audio file
       shell: pwsh
@@ -63,12 +72,13 @@ jobs:
       shell: pwsh
       run: |
         $env:PATH += ";C:\Program Files\Tesseract-OCR;C:\ProgramData\chocolatey\bin"
+        $env:RUST_LOG = "debug"
         $process = Start-Process -FilePath ".\target\release\screenpipe.exe" -ArgumentList "--debug" -PassThru -RedirectStandardOutput "screenpipe_output.log" -RedirectStandardError "screenpipe_error.log" -NoNewWindow
-        Start-Sleep -Seconds 10
+        Start-Sleep -Seconds 20
         
         # Display OCR test image
         Start-Process -FilePath "mspaint.exe" -ArgumentList "test_image.png" -PassThru
-        Start-Sleep -Seconds 20
+        Start-Sleep -Seconds 40
         
         # Play audio test file
         (New-Object Media.SoundPlayer ".github\scripts\audio_test.wav").PlaySync()
@@ -89,13 +99,14 @@ jobs:
             exit 1
           }
           Write-Host "CLI ran successfully without crashing"
-          Get-Content $LogFile -Tail 50
+          Get-Content $LogFile -Tail 100
           
           # Check for OCR result
           if (Select-String -Path $LogFile -Pattern "Hello, Screenpipe OCR" -Quiet) {
             Write-Host "OCR test passed: Text was recognized"
           } else {
             Write-Host "OCR test failed: Text was not recognized"
+            Get-Content $LogFile | Select-String "OCR" -Context 10,10
             exit 1
           }
           
@@ -108,8 +119,8 @@ jobs:
           }
         } else {
           Write-Host "Log file not found, checking standard output..."
-          Get-Content "screenpipe_output.log" -Tail 50
-          Get-Content "screenpipe_error.log" -Tail 50
+          Get-Content "screenpipe_output.log" -Tail 100
+          Get-Content "screenpipe_error.log" -Tail 100
           exit 1
         }
 
