@@ -68,26 +68,20 @@ jobs:
 
     - name: Test OCR
       run: |
-        # List available fonts
-        convert -list font
-
-        # Create a test image with known text using a standard font
+        echo "Creating test image..."
         convert -size 300x100 xc:white -font DejaVu-Sans -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
 
-        # Display the image
+        echo "Displaying test image..."
         DISPLAY=:99 display test_image.png &
         DISPLAY_PID=$!
 
-        # Give some time for screenpipe to capture and process the image
-        sleep 20
+        echo "Waiting for image to be processed..."
+        sleep 30
 
-        # Kill the display process
+        echo "Killing display process..."
         kill $DISPLAY_PID
 
-        # Wait a bit for processing to complete
-        sleep 10
-
-        # Check the logs for the OCR result
+        echo "Checking logs for OCR result..."
         if grep -qi "Hello, Screenpipe OCR" screenpipe_output.log; then
           echo "OCR test passed: Text was recognized"
         else
@@ -99,13 +93,13 @@ jobs:
 
     - name: Test Audio Capture
       run: |
-        # Play the pre-generated audio file
+        echo "Playing audio file..."
         paplay --device=virtual_speaker .github/scripts/audio_test.wav &
 
-        # Give some time for screenpipe to capture and process the audio
-        sleep 20
+        echo "Waiting for audio to be processed..."
+        sleep 30
 
-        # Check the logs for the phrase "human world" or any audio-related output
+        echo "Checking logs for audio result..."
         if grep -qi "human world" screenpipe_output.log || grep -qi "audio" screenpipe_output.log; then
           echo "Audio capture test passed: 'human world' or audio-related output found in logs"
         else
