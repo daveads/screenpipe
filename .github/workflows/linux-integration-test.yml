@@ -20,34 +20,34 @@ jobs:
         override: true
 
     - name: Install dependencies
-      run: .github/scripts/linux/install_dependencies.sh
+      run: .github/scripts/install_dependencies.sh
 
     - name: Verify Tesseract installation
-      run: .github/scripts/linux/verify_tesseract.sh
+      run: .github/scripts/verify_tesseract.sh
 
     - name: Build CLI
       run: cargo build --release
 
     - name: Set up virtual display with window manager
-      run: .github/scripts/linux/setup_display.sh
+      run: .github/scripts/setup_display.sh
 
     - name: Setup audio
-      run: .github/scripts/linux/setup_audio.sh
+      run: .github/scripts/setup_audio.sh
 
     - name: Run Screenpipe
-      run: .github/scripts/linux/run_screenpipe.sh
+      run: .github/scripts/run_screenpipe.sh
 
     - name: Test OCR
-      run: .github/scripts/linux/test_ocr.sh
+      run: .github/scripts/test_ocr.sh
 
     - name: Test Audio Capture
-      run: .github/scripts/linux/test_audio_capture.sh
+      run: .github/scripts/test_audio_capture.sh
 
     - name: Stop screenpipe
-      run: .github/scripts/linux/stop_screenpipe.sh
+      run: .github/scripts/stop_screenpipe.sh
 
     - name: Check for crashes and expected behavior
-      run: .github/scripts/linux/check_logs.sh
+      run: .github/scripts/check_logs.sh
 
     - name: Upload logs
       uses: actions/upload-artifact@v3
