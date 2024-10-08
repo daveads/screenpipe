@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu sox libsox-fmt-all
+        sudo apt-get install -y xvfb pulseaudio ffmpeg libasound2-dev libgtk-3-dev libwebkit2gtk-4.0-dev libavformat-dev libavfilter-dev libavdevice-dev x11-utils x11-apps xdotool openbox xterm fonts-liberation tesseract-ocr libtesseract-dev imagemagick fonts-dejavu
 
     - name: Verify Tesseract installation
       run: |
@@ -99,25 +99,17 @@ jobs:
 
     - name: Test Audio Capture
       run: |
-        # Generate a simple test audio file with the name "David"
-        echo "David" | text2wave -o test_audio.wav
-
-        # If text2wave fails, fallback to generating a tone
-        if [ ! -f test_audio.wav ]; then
-          sox -n -r 44100 -c 1 test_audio.wav synth 2 sine 440
-        fi
-
-        # Play the audio file through the virtual audio device
-        paplay --device=virtual_speaker test_audio.wav &
+        # Play the pre-generated audio file
+        paplay --device=virtual_speaker .github/scripts/audio_test.wav &
 
         # Give some time for screenpipe to capture and process the audio
         sleep 20
 
-        # Check the logs for the name "David" or any audio-related output
-        if grep -qi "David" screenpipe_output.log || grep -qi "audio" screenpipe_output.log; then
-          echo "Audio capture test passed: 'David' or audio-related output found in logs"
+        # Check the logs for the phrase "human world" or any audio-related output
+        if grep -qi "human world" screenpipe_output.log || grep -qi "audio" screenpipe_output.log; then
+          echo "Audio capture test passed: 'human world' or audio-related output found in logs"
         else
-          echo "Audio capture test failed: Neither 'David' nor audio-related output found in logs"
+          echo "Audio capture test failed: Neither 'human world' nor audio-related output found in logs"
           echo "Last 100 lines of log:"
           tail -n 100 screenpipe_output.log
           exit 1
@@ -171,10 +163,3 @@ jobs:
       with:
         name: test-image
         path: test_image.png
-
-    - name: Upload test audio
-      uses: actions/upload-artifact@v3
-      if: always()
-      with:
-        name: test-audio
-        path: test_audio.wav
