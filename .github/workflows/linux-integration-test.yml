@@ -49,12 +49,30 @@ jobs:
         xrandr || echo "xrandr failed"
         xwininfo -root -children || echo "xwininfo failed"
 
-    - name: Run CLI and capture output
+    - name: Set up audio
       run: |
-        export DISPLAY=:99
-        export SCREENPIPE_CAPTURE_METHOD=x11 # Force X11 capture method
-        export PATH=$PATH:/usr/bin  # Ensure /usr/bin is in PATH
-        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/x86_64-linux-gnu  # Add Tesseract library path
+        # Kill any existing PulseAudio processes
+        pulseaudio --kill || true
+        
+        # Start PulseAudio in the background
+        pulseaudio --start --exit-idle-time=-1 --daemon
+        
+        # Wait for PulseAudio to fully start
+        sleep 5
+        
+        # Load the null sink module
+        pactl load-module module-null-sink sink_name=virtual_speaker
+        
+        # Set the default sink
+        pactl set-default-sink virtual_speaker
+        
+        # List audio devices to verify setup
+        pactl list short sinks
+        pactl list short sources
+
+    - name: Run Screenpipe
+      run: |
+        export PULSE_SERVER=unix:/run/user/$(id -u)/pulse/native
         ./target/release/screenpipe --debug > screenpipe_output.log 2>&1 &
         SCREENPIPE_PID=$!
         echo $SCREENPIPE_PID > screenpipe.pid
@@ -87,40 +105,12 @@ jobs:
 
     - name: Test Audio Capture
       run: |
-        echo "Checking PulseAudio status..."
-        pulseaudio --check || (echo "PulseAudio is not running. Starting it now..."; pulseaudio --start --exit-idle-time=-1)
-        
-        echo "Waiting for PulseAudio to be fully operational..."
-        sleep 10
-        
-        echo "Listing audio devices..."
-        pacmd list-sinks
-        pacmd list-sources
-        
-        echo "Loading null sink module..."
-        pacmd load-module module-null-sink sink_name=virtual_speaker
-        pacmd load-module module-virtual-source source_name=virtual_mic
-        
-        echo "Setting default sink and source..."
-        pacmd set-default-sink virtual_speaker
-        pacmd set-default-source virtual_mic
-        
         echo "Verifying audio file exists..."
         ls -l .github/scripts/audio_test.wav
         
         echo "Playing audio file..."
-        if paplay .github/scripts/audio_test.wav; then
-          echo "Audio file played successfully"
-        else
-          echo "Failed to play audio file with paplay, trying aplay..."
-          if aplay .github/scripts/audio_test.wav; then
-            echo "Audio file played successfully with aplay"
-          else
-            echo "Failed to play audio file with both paplay and aplay"
-            echo "Continuing with the test, but audio playback failed"
-          fi
-        fi
-
+        paplay --device=virtual_speaker .github/scripts/audio_test.wav
+        
         echo "Waiting for audio to be processed..."
         sleep 30
 
@@ -138,8 +128,8 @@ jobs:
           echo "Audio capture test failed: Neither 'human world' nor audio-related output found in logs"
           echo "Last 100 lines of log:"
           tail -n 100 screenpipe_output.log
+          exit 1
         fi
-
 
     - name: Stop screenpipe
       run: |
