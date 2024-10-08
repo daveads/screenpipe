@@ -72,7 +72,7 @@ jobs:
         convert -list font
 
         # Create a test image with known text using a standard font
-        convert -size 300x100 xc:white -font DejaVu-Sans -pointsize 24 -fill black -draw "text 10,50 'Screenpipe OCR'" test_image.png
+        convert -size 300x100 xc:white -font DejaVu-Sans -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
         
         # Display the image
         DISPLAY=:99 display test_image.png &
