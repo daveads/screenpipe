@@ -141,11 +141,18 @@ jobs:
         name: screenpipe-data
         path: ${{ env.USERPROFILE }}\.screenpipe\data\
 
-    - name: Upload test files
+    - name: Upload test files and screenshots
       uses: actions/upload-artifact@v3
       if: always()
       with:
-        name: test-files
+        name: test-files-and-screenshots
         path: |
           test_image.png
           .github\scripts\audio_test.wav
+          ${{ env.USERPROFILE }}\.screenpipe\data\**\*.png
+
+    - name: List captured files
+      shell: pwsh
+      run: |
+        Write-Host "Listing files in .screenpipe\data directory:"
+        Get-ChildItem -Path "$env:USERPROFILE\.screenpipe\data" -Recurse | Select-Object FullName, Length, CreationTime | Format-Table -AutoSize

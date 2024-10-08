@@ -63,7 +63,6 @@ jobs:
         name: screenpipe-data
         path: |
           ~/.screenpipe/data/
-          ~/.screenpipe/db.sqlite
     
     - name: Upload test image
       uses: actions/upload-artifact@v3
