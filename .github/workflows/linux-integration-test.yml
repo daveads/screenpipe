@@ -97,10 +97,15 @@ jobs:
           exit 1
         fi
 
-    - name: Test Audio Transcription
+    - name: Test Audio Capture
       run: |
-        # Generate a simple test audio file with a single tone
-        sox -n -r 44100 -c 1 test_audio.wav synth 5 sine 440
+        # Generate a simple test audio file with the name "David"
+        echo "David" | text2wave -o test_audio.wav
+
+        # If text2wave fails, fallback to generating a tone
+        if [ ! -f test_audio.wav ]; then
+          sox -n -r 44100 -c 1 test_audio.wav synth 2 sine 440
+        fi
 
         # Play the audio file through the virtual audio device
         paplay --device=virtual_speaker test_audio.wav &
@@ -108,11 +113,11 @@ jobs:
         # Give some time for screenpipe to capture and process the audio
         sleep 20
 
-        # Check the logs for any audio-related output
-        if grep -qi "audio" screenpipe_output.log; then
-          echo "Audio capture test passed: Audio-related output found in logs"
+        # Check the logs for the name "David" or any audio-related output
+        if grep -qi "David" screenpipe_output.log || grep -qi "audio" screenpipe_output.log; then
+          echo "Audio capture test passed: 'David' or audio-related output found in logs"
         else
-          echo "Audio capture test failed: No audio-related output found in logs"
+          echo "Audio capture test failed: Neither 'David' nor audio-related output found in logs"
           echo "Last 100 lines of log:"
           tail -n 100 screenpipe_output.log
           exit 1
