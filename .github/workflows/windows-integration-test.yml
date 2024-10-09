@@ -115,20 +115,6 @@ jobs:
           exit 1
         }
 
-
-    - name: Collect process and system information
-      if: failure()
-      shell: pwsh
-      run: |
-        Write-Host "Collecting process information..."
-        Get-Process | Where-Object {$_.ProcessName -like "*screen*" -or $_.ProcessName -like "*rust*" -or $_.ProcessName -eq "mspaint"} | Format-Table -AutoSize
-        
-        Write-Host "Collecting system event logs..."
-        Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2,3} -MaxEvents 50 | Format-Table -AutoSize
-        
-        Write-Host "Collecting application event logs..."
-        Get-WinEvent -FilterHashtable @{LogName='Application'; Level=1,2,3} -MaxEvents 50 | Format-Table -AutoSize
-
     - name: Check for crashes and expected behavior
       shell: pwsh
       run: |
