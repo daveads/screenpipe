@@ -56,10 +56,33 @@ jobs:
       shell: pwsh
       run: |
         $env:RUST_LOG = "trace"
-        Start-Process -FilePath ".\target\release\screenpipe.exe" -ArgumentList "--debug" -RedirectStandardOutput "screenpipe_output.log" -RedirectStandardError "screenpipe_error.log" -NoNewWindow
-        $screenpipePID = (Get-Process screenpipe).Id
-        echo $screenpipePID > screenpipe.pid
-        Start-Sleep -Seconds 60  # Increased initialization time
+        $process = Start-Process -FilePath ".\target\release\screenpipe.exe" -ArgumentList "--debug" -RedirectStandardOutput "screenpipe_output.log" -RedirectStandardError "screenpipe_error.log" -PassThru -NoNewWindow
+        $process.Id | Out-File -FilePath screenpipe.pid
+        Write-Host "Screenpipe started with PID: $($process.Id)"
+        
+        # Wait for the server to start or timeout after 2 minutes
+        $timeout = New-TimeSpan -Minutes 2
+        $sw = [diagnostics.stopwatch]::StartNew()
+        $serverStarted = $false
+        
+        while ($sw.elapsed -lt $timeout) {
+          if (Select-String -Path "screenpipe_output.log" -Pattern "Server starting on 127.0.0.1:3030" -Quiet) {
+            $serverStarted = $true
+            Write-Host "Screenpipe server started successfully"
+            break
+          }
+          Start-Sleep -Seconds 5
+        }
+        
+        if (-not $serverStarted) {
+          Write-Host "Screenpipe server failed to start within the timeout period"
+          Get-Content "screenpipe_output.log" -Tail 100
+          Get-Content "screenpipe_error.log" -Tail 100
+          exit 1
+        }
+        
+        # Additional 60 seconds wait for full initialization
+        Start-Sleep -Seconds 60
 
     - name: Test OCR
       shell: pwsh
@@ -126,8 +149,42 @@ jobs:
     - name: Stop screenpipe
       shell: pwsh
       run: |
-        Stop-Process -Id (Get-Content screenpipe.pid)
-        Start-Sleep -Seconds 10  # Increased time for graceful shutdown
+        $pidFile = "screenpipe.pid"
+        if (Test-Path $pidFile) {
+          $pid = Get-Content $pidFile
+          Write-Host "Screenpipe PID from file: $pid"
+          
+          $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+          if ($process) {
+            Write-Host "Screenpipe process is still running. Stopping it now."
+            Stop-Process -Id $pid -Force
+            Start-Sleep -Seconds 10  # Wait for graceful shutdown
+          } else {
+            Write-Host "Screenpipe process is not running. It may have crashed or exited unexpectedly."
+            Get-WinEvent -FilterHashtable @{LogName='Application'; ID=1000} -MaxEvents 10 | Format-List
+          }
+        } else {
+          Write-Host "PID file not found. Screenpipe may not have started correctly."
+        }
+        
+        # Check for any remaining screenpipe processes and stop them
+        Get-Process | Where-Object {$_.ProcessName -eq "screenpipe"} | ForEach-Object {
+          Write-Host "Found additional screenpipe process with PID $($_.Id). Stopping it."
+          Stop-Process -Id $_.Id -Force
+        }
+
+    - name: Collect process and system information
+      if: failure()
+      shell: pwsh
+      run: |
+        Write-Host "Collecting process information..."
+        Get-Process | Where-Object {$_.ProcessName -like "*screen*" -or $_.ProcessName -like "*rust*" -or $_.ProcessName -eq "mspaint"} | Format-Table -AutoSize
+        
+        Write-Host "Collecting system event logs..."
+        Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2,3} -MaxEvents 50 | Format-Table -AutoSize
+        
+        Write-Host "Collecting application event logs..."
+        Get-WinEvent -FilterHashtable @{LogName='Application'; Level=1,2,3} -MaxEvents 50 | Format-Table -AutoSize
 
     - name: Check for crashes and expected behavior
       shell: pwsh
