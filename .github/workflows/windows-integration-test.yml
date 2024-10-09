@@ -88,7 +88,7 @@ jobs:
       shell: pwsh
       run: |
         Write-Host "Creating test image..."
-        magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
+        magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'AAHello, Screenpipe OCRAA'" test_image.png
 
         Write-Host "Displaying test image..."
         $image = Start-Process mspaint -ArgumentList "test_image.png" -PassThru
