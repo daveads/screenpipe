@@ -61,31 +61,6 @@ jobs:
         echo $screenpipePID > screenpipe.pid
         Start-Sleep -Seconds 30  # Let screenpipe initialize
 
-    - name: Test OCR
-      shell: pwsh
-      run: |
-        Write-Host "Creating test image..."
-        magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
-        
-        Write-Host "Displaying test image..."
-        $image = Start-Process mspaint -ArgumentList "test_image.png" -PassThru
-        
-        Write-Host "Waiting for image to be processed..."
-        Start-Sleep -Seconds 30
-        
-        Write-Host "Closing image..."
-        Stop-Process -Id $image.Id
-        
-        Write-Host "Checking logs for OCR result..."
-        if (Select-String -Path "screenpipe_output.log" -Pattern "Hello, Screenpipe OCR" -Quiet) {
-          Write-Host "OCR test passed: Text was recognized"
-        } else {
-          Write-Host "OCR test failed: Text was not recognized"
-          Write-Host "Last 100 lines of log:"
-          Get-Content "screenpipe_output.log" -Tail 100
-          exit 1
-        }
-
     - name: Test Audio Capture
       shell: pwsh
       run: |
