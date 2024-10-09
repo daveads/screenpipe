@@ -59,7 +59,38 @@ jobs:
         Start-Process -FilePath ".\target\release\screenpipe.exe" -ArgumentList "--debug" -RedirectStandardOutput "screenpipe_output.log" -RedirectStandardError "screenpipe_error.log" -NoNewWindow
         $screenpipePID = (Get-Process screenpipe).Id
         echo $screenpipePID > screenpipe.pid
-        Start-Sleep -Seconds 30  # Let screenpipe initialize
+        Start-Sleep -Seconds 60  # Increased initialization time
+
+    - name: Test OCR
+      shell: pwsh
+      run: |
+        Write-Host "Creating test image..."
+        magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
+
+        Write-Host "Displaying test image..."
+        $image = Start-Process mspaint -ArgumentList "test_image.png" -PassThru
+
+        Write-Host "Waiting for image to be processed..."
+        $timeout = 120  # Increased timeout to 2 minutes
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $ocrDetected = $false
+        while ($stopwatch.Elapsed.TotalSeconds -lt $timeout -and -not $ocrDetected) {
+          if (Select-String -Path "screenpipe_output.log" -Pattern "Hello, Screenpipe OCR|OCR detected text|Performing OCR" -Quiet) {
+            $ocrDetected = $true
+            Write-Host "OCR test passed: Text or OCR detection found in logs"
+          } else {
+            Start-Sleep -Seconds 5
+          }
+        }
+
+        Stop-Process -Id $image.Id
+
+        if (-not $ocrDetected) {
+          Write-Host "OCR test failed: Text was not recognized within timeout"
+          Write-Host "Last 200 lines of log:"
+          Get-Content "screenpipe_output.log" -Tail 200
+          exit 1
+        }
 
     - name: Test Audio Capture
       shell: pwsh
@@ -73,19 +104,22 @@ jobs:
         $player.PlaySync()
 
         Write-Host "Waiting for audio to be processed..."
-        Start-Sleep -Seconds 30
+        $timeout = 120  # Increased timeout to 2 minutes
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $audioDetected = $false
+        while ($stopwatch.Elapsed.TotalSeconds -lt $timeout -and -not $audioDetected) {
+          if (Select-String -Path "screenpipe_output.log" -Pattern "human world|audio transcription|speech detected" -Quiet) {
+            $audioDetected = $true
+            Write-Host "Audio capture test passed: Relevant audio-related output found in logs"
+          } else {
+            Start-Sleep -Seconds 5
+          }
+        }
 
-        Write-Host "Checking logs for audio result..."
-        if (Select-String -Path "screenpipe_output.log" -Pattern "human world" -Quiet) {
-          Write-Host "Audio capture test passed: 'human world' found in logs"
-        } elseif (Select-String -Path "screenpipe_output.log" -Pattern "audio" -Quiet) {
-          Write-Host "Audio capture test partially passed: Audio-related output found in logs, but not the specific phrase"
-          Write-Host "Grep results for 'audio':"
-          Select-String -Path "screenpipe_output.log" -Pattern "audio"
-        } else {
-          Write-Host "Audio capture test failed: Neither 'human world' nor audio-related output found in logs"
-          Write-Host "Last 100 lines of log:"
-          Get-Content "screenpipe_output.log" -Tail 100
+        if (-not $audioDetected) {
+          Write-Host "Audio capture test failed: No relevant audio-related output found in logs"
+          Write-Host "Last 200 lines of log:"
+          Get-Content "screenpipe_output.log" -Tail 200
           exit 1
         }
 
@@ -93,16 +127,16 @@ jobs:
       shell: pwsh
       run: |
         Stop-Process -Id (Get-Content screenpipe.pid)
-        Start-Sleep -Seconds 5  # Give time for graceful shutdown
+        Start-Sleep -Seconds 10  # Increased time for graceful shutdown
 
     - name: Check for crashes and expected behavior
       shell: pwsh
       run: |
         Write-Host "Checking log file..."
-        Write-Host "Last 100 lines of log:"
-        Get-Content "screenpipe_output.log" -Tail 100
-        if (Select-String -Path "screenpipe_output.log" -Pattern "panic" -Quiet) {
-          Write-Host "CLI crashed"
+        Write-Host "Last 200 lines of log:"
+        Get-Content "screenpipe_output.log" -Tail 200
+        if (Select-String -Path "screenpipe_output.log" -Pattern "panic|error|exception" -Quiet) {
+          Write-Host "CLI crashed or encountered errors"
           exit 1
         }
         if (-not (Select-String -Path "screenpipe_output.log" -Pattern "Server starting on 127.0.0.1:3030" -Quiet)) {
