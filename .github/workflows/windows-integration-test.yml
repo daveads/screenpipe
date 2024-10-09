@@ -2,9 +2,9 @@ name: Windows CLI Integration Test
 
 on:
   push:
-    branches: [ cli-test ]
+    branches: [ main ]
   pull_request:
-    branches: [ cli-test ]
+    branches: [ main ]
 
 jobs:
   test-windows:
@@ -55,7 +55,6 @@ jobs:
     - name: Prepare test image
       shell: pwsh
       run: |
-        # Create a test image with text
         Add-Type -AssemblyName System.Drawing
         $bmp = New-Object System.Drawing.Bitmap 400, 100
         $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -97,6 +96,8 @@ jobs:
           Write-Host "OCR test passed: Text was recognized"
         } else {
           Write-Host "OCR test failed: Text was not recognized"
+          Write-Host "Log content:"
+          Write-Host $logContent
           exit 1
         }
 
@@ -105,6 +106,8 @@ jobs:
           Write-Host "Audio transcription test passed"
         } else {
           Write-Host "Audio transcription test failed"
+          Write-Host "Log content:"
+          Write-Host $logContent
           exit 1
         }
 
