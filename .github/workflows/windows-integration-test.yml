@@ -88,7 +88,7 @@ jobs:
       shell: pwsh
       run: |
         Write-Host "Creating test image..."
-        magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'AAHello, Screenpipe OCRAA'" test_image.png
+        magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
 
         Write-Host "Displaying test image..."
         $image = Start-Process mspaint -ArgumentList "test_image.png" -PassThru
@@ -115,34 +115,6 @@ jobs:
           exit 1
         }
 
-
-
-    - name: Stop screenpipe
-      shell: pwsh
-      run: |
-        $pidFile = "screenpipe.pid"
-        if (Test-Path $pidFile) {
-          $pid = Get-Content $pidFile
-          Write-Host "Screenpipe PID from file: $pid"
-          
-          $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
-          if ($process) {
-            Write-Host "Screenpipe process is still running. Stopping it now."
-            Stop-Process -Id $pid -Force
-            Start-Sleep -Seconds 10  # Wait for graceful shutdown
-          } else {
-            Write-Host "Screenpipe process is not running. It may have crashed or exited unexpectedly."
-            Get-WinEvent -FilterHashtable @{LogName='Application'; ID=1000} -MaxEvents 10 | Format-List
-          }
-        } else {
-          Write-Host "PID file not found. Screenpipe may not have started correctly."
-        }
-        
-        # Check for any remaining screenpipe processes and stop them
-        Get-Process | Where-Object {$_.ProcessName -eq "screenpipe"} | ForEach-Object {
-          Write-Host "Found additional screenpipe process with PID $($_.Id). Stopping it."
-          Stop-Process -Id $_.Id -Force
-        }
 
     - name: Collect process and system information
       if: failure()
