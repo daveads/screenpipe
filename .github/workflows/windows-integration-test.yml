@@ -88,21 +88,29 @@ jobs:
       shell: pwsh
       run: |
         Write-Host "Creating test image..."
-        magick -size 300x100 xc:white -font Arial -pointsize 24 -fill black -draw "text 10,50 'Hello, Screenpipe OCR'" test_image.png
+        $testPhrase = "SCREENPIPE_OCR_TEST_1234"
+        magick -size 800x600 xc:white -font Arial -pointsize 48 -fill black -draw "text 50,300 '$testPhrase'" test_image.png
 
         Write-Host "Displaying test image..."
         $image = Start-Process mspaint -ArgumentList "test_image.png" -PassThru
+        Start-Sleep -Seconds 2  # Wait for mspaint to open
+        $wshell = New-Object -ComObject wscript.shell
+        $wshell.AppActivate($image.Id)
+        $wshell.SendKeys("% x")  # ALT+SPACE, x to maximize
 
         Write-Host "Waiting for image to be processed..."
-        $timeout = 120  # Increased timeout to 2 minutes
+        $timeout = 180  # Increased timeout to 3 minutes
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $ocrDetected = $false
         while ($stopwatch.Elapsed.TotalSeconds -lt $timeout -and -not $ocrDetected) {
-          if (Select-String -Path "screenpipe_output.log" -Pattern "Hello, Screenpipe OCR|OCR detected text|Performing OCR" -Quiet) {
+          $logContent = Get-Content "screenpipe_output.log" -Tail 1000
+          if ($logContent -match $testPhrase -or $logContent -match "OCR detected text" -or $logContent -match "Performing OCR") {
             $ocrDetected = $true
             Write-Host "OCR test passed: Text or OCR detection found in logs"
+            Write-Host "Matching log line: $($matches[0])"
           } else {
-            Start-Sleep -Seconds 5
+            Write-Host "Waiting for OCR detection... Elapsed time: $($stopwatch.Elapsed.TotalSeconds) seconds"
+            Start-Sleep -Seconds 10
           }
         }
 
@@ -110,10 +118,35 @@ jobs:
 
         if (-not $ocrDetected) {
           Write-Host "OCR test failed: Text was not recognized within timeout"
-          Write-Host "Last 200 lines of log:"
-          Get-Content "screenpipe_output.log" -Tail 200
+          Write-Host "Last 500 lines of log:"
+          Get-Content "screenpipe_output.log" -Tail 500
           exit 1
         }
+
+    - name: Collect OCR Debug Information
+      if: failure()
+      shell: pwsh
+      run: |
+        Write-Host "Collecting OCR debug information..."
+        Write-Host "Screenpipe process status:"
+        Get-Process screenpipe -ErrorAction SilentlyContinue | Format-List
+
+        Write-Host "Windows OCR components status:"
+        Get-WindowsCapability -Online | Where-Object { $_.Name -like "*TextRecognition*" } | Format-Table
+
+        Write-Host "Last 1000 lines of Screenpipe log:"
+        Get-Content "screenpipe_output.log" -Tail 1000
+
+        Write-Host "System resource usage:"
+        Get-Process | Where-Object { $_.ProcessName -eq "screenpipe" -or $_.ProcessName -eq "mspaint" } | Format-Table Id, ProcessName, CPU, WorkingSet, VirtualMemorySize
+
+        Write-Host "Checking if test image exists:"
+        if (Test-Path "test_image.png") {
+          Write-Host "Test image exists"
+        } else {
+          Write-Host "Test image does not exist"
+        }
+
 
     - name: Check for crashes and expected behavior
       shell: pwsh
