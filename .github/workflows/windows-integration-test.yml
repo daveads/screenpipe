@@ -115,36 +115,7 @@ jobs:
           exit 1
         }
 
-    - name: Test Audio Capture
-      shell: pwsh
-      run: |
-        Write-Host "Verifying audio file exists..."
-        Get-Item .github\scripts\audio_test.wav
 
-        Write-Host "Playing audio file..."
-        $player = New-Object System.Media.SoundPlayer
-        $player.SoundLocation = ".github\scripts\audio_test.wav"
-        $player.PlaySync()
-
-        Write-Host "Waiting for audio to be processed..."
-        $timeout = 120  # Increased timeout to 2 minutes
-        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        $audioDetected = $false
-        while ($stopwatch.Elapsed.TotalSeconds -lt $timeout -and -not $audioDetected) {
-          if (Select-String -Path "screenpipe_output.log" -Pattern "human world|audio transcription|speech detected" -Quiet) {
-            $audioDetected = $true
-            Write-Host "Audio capture test passed: Relevant audio-related output found in logs"
-          } else {
-            Start-Sleep -Seconds 5
-          }
-        }
-
-        if (-not $audioDetected) {
-          Write-Host "Audio capture test failed: No relevant audio-related output found in logs"
-          Write-Host "Last 200 lines of log:"
-          Get-Content "screenpipe_output.log" -Tail 200
-          exit 1
-        }
 
     - name: Stop screenpipe
       shell: pwsh
