@@ -2,9 +2,9 @@ name: Windows CLI Integration Test
 
 on:
   push:
-    branches: [ cli-test ]
+    branches: [ main ]
   pull_request:
-    branches: [ cli-test ]
+    branches: [ main ]
 
 jobs:
   test-windows:
@@ -52,51 +52,64 @@ jobs:
     - name: Build CLI
       run: cargo build --release
 
+    - name: Prepare test image
+      shell: pwsh
+      run: |
+        # Create a test image with text
+        Add-Type -AssemblyName System.Drawing
+        $bmp = New-Object System.Drawing.Bitmap 400, 100
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.Clear([System.Drawing.Color]::White)
+        $font = New-Object System.Drawing.Font "Arial", 16
+        $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::Black)
+        $g.DrawString("Hello, Screenpipe OCR Test", $font, $brush, 10, 40)
+        $bmp.Save("test_image.png")
+        $g.Dispose()
+        $bmp.Dispose()
+
     - name: Run CLI and generate activity
       shell: pwsh
       run: |
         $env:RUST_LOG = "debug"
         $process = Start-Process -FilePath ".\target\release\screenpipe.exe" -ArgumentList "--debug" -PassThru -RedirectStandardOutput "screenpipe_output.log" -RedirectStandardError "screenpipe_error.log" -NoNewWindow
         Start-Sleep -Seconds 10
-        
-        # Generate some screen activity
-        for ($i = 0; $i -lt 5; $i++) {
-          Start-Process "notepad.exe"
-          Start-Sleep -Seconds 2
-          Stop-Process -Name "notepad" -Force
-          Start-Sleep -Seconds 2
-        }
-        
-        # Generate some audio using PowerShell
-        [console]::beep(2000,1000)
-        
+
+        # Display test image
+        $image = Start-Process mspaint -ArgumentList "test_image.png" -PassThru
+        Start-Sleep -Seconds 10
+        Stop-Process -Id $image.Id
+
+        # Play test audio
+        $player = New-Object System.Media.SoundPlayer
+        $player.SoundLocation = ".github\scripts\audio_test.wav"
+        $player.PlaySync()
+
         Start-Sleep -Seconds 30  # Allow more time for processing
         Stop-Process -Id $process.Id -Force
 
-    - name: Check for crashes and captured data
+    - name: Check for OCR and audio transcription
       shell: pwsh
       run: |
-        if (Select-String -Path "screenpipe_output.log" -Pattern "panic" -Quiet) {
-          Write-Host "CLI crashed"
-          Get-Content "screenpipe_output.log"
+        $logContent = Get-Content "screenpipe_output.log" -Raw
+
+        # Check for OCR result
+        if ($logContent -match "Hello, Screenpipe OCR Test") {
+          Write-Host "OCR test passed: Text was recognized"
+        } else {
+          Write-Host "OCR test failed: Text was not recognized"
           exit 1
         }
-        Write-Host "CLI ran successfully without crashing"
-        
-        $capturedFiles = Get-ChildItem -Path "$env:USERPROFILE\.screenpipe\data" -Recurse
-        if ($capturedFiles.Count -eq 0) {
-          Write-Host "No data was captured"
+
+        # Check for audio transcription
+        if ($logContent -match "human world") {
+          Write-Host "Audio transcription test passed"
+        } else {
+          Write-Host "Audio transcription test failed"
           exit 1
         }
-        Write-Host "Data captured successfully. File count: $($capturedFiles.Count)"
-        
-        if (Select-String -Path "screenpipe_error.log" -Pattern "no audio devices available" -Quiet) {
-          Write-Host "Audio device setup failed"
-          exit 1
-        }
-        
-        Get-Content "screenpipe_output.log" -Tail 100
-        Get-Content "screenpipe_error.log"
+
+        # Display last 200 lines of log for debugging
+        Get-Content "screenpipe_output.log" -Tail 200
 
     - name: Upload logs and data
       uses: actions/upload-artifact@v3
@@ -107,3 +120,11 @@ jobs:
           screenpipe_output.log
           screenpipe_error.log
           ${{ env.USERPROFILE }}\.screenpipe\data\
+          test_image.png
+          .github\scripts\audio_test.wav
+
+    - name: List captured files
+      shell: pwsh
+      run: |
+        Write-Host "Listing files in .screenpipe\data directory:"
+        Get-ChildItem -Path "$env:USERPROFILE\.screenpipe\data" -Recurse | Select-Object FullName, Length, CreationTime | Format-Table -AutoSize
