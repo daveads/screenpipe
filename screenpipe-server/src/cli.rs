@@ -3,6 +3,7 @@ use screenpipe_audio::{vad_engine::VadSensitivity, AudioTranscriptionEngine as C
 use screenpipe_vision::utils::OcrEngine as CoreOcrEngine;
 use clap::ValueEnum;
 use screenpipe_audio::vad_engine::VadEngineEnum;
+use screenpipe_core::Language;
 
 #[derive(Clone, Debug, ValueEnum, PartialEq)]
 pub enum CliAudioTranscriptionEngine {
@@ -12,6 +13,8 @@ pub enum CliAudioTranscriptionEngine {
     WhisperTiny,
     #[clap(name = "whisper-large")]
     WhisperDistilLargeV3,
+    #[clap(name = "whisper-large-v3-turbo")]
+    WhisperLargeV3Turbo,
 }
 
 impl From<CliAudioTranscriptionEngine> for CoreAudioTranscriptionEngine {
@@ -22,6 +25,9 @@ impl From<CliAudioTranscriptionEngine> for CoreAudioTranscriptionEngine {
             CliAudioTranscriptionEngine::WhisperDistilLargeV3 => {
                 CoreAudioTranscriptionEngine::WhisperDistilLargeV3
             }
+            CliAudioTranscriptionEngine::WhisperLargeV3Turbo => {
+                CoreAudioTranscriptionEngine::WhisperLargeV3Turbo
+            }
         }
     }
 }
@@ -29,7 +35,7 @@ impl From<CliAudioTranscriptionEngine> for CoreAudioTranscriptionEngine {
 #[derive(Clone, Debug, ValueEnum, PartialEq)]
 pub enum CliOcrEngine {
     Unstructured,
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     Tesseract,
     #[cfg(target_os = "windows")]
     WindowsNative,
@@ -41,7 +47,7 @@ impl From<CliOcrEngine> for CoreOcrEngine {
     fn from(cli_engine: CliOcrEngine) -> Self {
         match cli_engine {
             CliOcrEngine::Unstructured => CoreOcrEngine::Unstructured,
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "linux")]
             CliOcrEngine::Tesseract => CoreOcrEngine::Tesseract,
             #[cfg(target_os = "windows")]
             CliOcrEngine::WindowsNative => CoreOcrEngine::WindowsNative,
@@ -137,8 +143,9 @@ pub struct Cli {
     /// Audio transcription engine to use.
     /// Deepgram is a very high quality cloud-based transcription service (free of charge on us for now), recommended for high quality audio.
     /// WhisperTiny is a local, lightweight transcription model, recommended for high data privacy.
-    /// WhisperDistilLargeV3 is a local, lightweight transcription model (--a whisper-large), recommended for higher quality audio than tiny.
-    #[arg(short = 'a', long, value_enum, default_value_t = CliAudioTranscriptionEngine::WhisperDistilLargeV3)]
+    /// WhisperDistilLargeV3 is a local, lightweight transcription model (-a whisper-large), recommended for higher quality audio than tiny.
+    /// WhisperLargeV3Turbo is a local, lightweight transcription model (-a whisper-large-v3-turbo), recommended for higher quality audio than tiny.
+    #[arg(short = 'a', long, value_enum, default_value_t = CliAudioTranscriptionEngine::WhisperLargeV3Turbo)]
     pub audio_transcription_engine: CliAudioTranscriptionEngine,
 
     /// OCR engine to use.
@@ -172,6 +179,9 @@ pub struct Cli {
     #[arg(short = 'm', long)]
     pub monitor_id: Vec<u32>,
 
+    #[arg(short = 'l', long, value_enum)]
+    pub language: Vec<Language>,
+
     /// Enable PII removal from OCR text property that is saved to db and returned in search results
     #[arg(long, default_value_t = false)]
     pub use_pii_removal: bool,
@@ -186,7 +196,7 @@ pub struct Cli {
 
     /// List of windows to ignore (by title) for screen recording - we use contains to match, example:
     /// --ignored-windows "Spotify" --ignored-windows "Bit" will ignore both "Bitwarden" and "Bittorrent"
-    /// --ignored-windows "porn" will ignore "pornhub" and "youporn"
+    /// --ignored-windows "x" will ignore "Home / X" and "SpaceX"
     #[arg(long)]
     pub ignored_windows: Vec<String>,
 
@@ -216,9 +226,40 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     pub disable_telemetry: bool,
 
+    /// Enable Local LLM API
+    #[arg(long, default_value_t = false)]
+    pub enable_llm: bool,
+
+    /// Enable beta features
+    #[cfg(feature = "beta")]
+    #[arg(long, default_value_t = false)]
+    pub enable_beta: bool,
+
+    /// Enable UI monitoring (macOS only)
+    #[arg(long, default_value_t = false)]
+    pub enable_ui_monitoring: bool,
+    
+    /// Enable experimental video frame cache (may increase CPU usage) - makes timeline UI available, frame streaming, etc.
+    #[arg(long, default_value_t = false)]
+    pub enable_frame_cache: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 
+}
+
+
+
+impl Cli {
+    pub fn unique_languages(&self) -> Result<Vec<Language>, String> {
+        let mut unique_langs = std::collections::HashSet::new();
+        for lang in &self.language {
+            if !unique_langs.insert(lang.clone()) {
+                // continue don't care
+            }
+        }
+        Ok(unique_langs.into_iter().collect())
+    }
 }
 
 #[derive(Subcommand)]
@@ -228,7 +269,13 @@ pub enum Command {
         #[command(subcommand)]
         subcommand: PipeCommand,
     },
-    // ... (other top-level commands if any)
+    /// Setup screenpipe environment
+    Setup {
+        /// Enable beta features
+        // #[cfg(feature = "beta")] // ! TODO
+        #[arg(long, default_value_t = false)]
+        enable_beta: bool,
+    },
 }
 
 

@@ -24,6 +24,8 @@
 data/ 
 text_json/
 
+src-tauri/deno-*
+
 # Ignore package-lock.json in the vercel-ai-chatbot example
 examples/typescript/vercel-ai-chatbot/package-lock.json
 
@@ -41,3 +43,7 @@ onnxruntime-win-x64-gpu*/
 
 # ignore environment variables
 .env
+
+# JavaScript stuff
+node_modules/
+

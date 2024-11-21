@@ -2,12 +2,11 @@
   "identifier": "migrated",
   "description": "permissions that were migrated from v1",
   "local": true,
-  "windows": [
-    "main"
-  ],
+  "windows": ["main", "timeline"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:default",
+    "core:app:allow-version",
     "process:allow-restart",
     "process:allow-exit",
     "notification:default",
@@ -35,6 +34,11 @@
     "fs:allow-read-text-file",
     "fs:allow-create",
     "fs:allow-mkdir",
+    "global-shortcut:allow-is-registered",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
+    "global-shortcut:default",
     {
       "identifier": "fs:scope",
       "allow": [
@@ -126,10 +130,44 @@
         {
           "name": "screenpipe",
           "cmd": "screenpipe",
+          "args": ["pipe", "purge", "-y"],
+          "sidecar": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "screenpipe",
+          "cmd": "screenpipe",
+          "args": ["setup"],
+          "sidecar": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "ollama",
+          "cmd": "ollama",
+          "args": ["serve"],
+          "sidecar": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "ollama-run",
+          "cmd": "ollama",
           "args": [
-            "pipe",
-            "purge",
-            "-y"
+            "run",
+            {
+              "validator": "\\S*"
+            }
           ],
           "sidecar": true
         }
@@ -137,6 +175,7 @@
     },
     "cli:default",
     "shell:default",
+    "shell:allow-spawn",
     "dialog:default",
     "updater:default",
     "os:default",

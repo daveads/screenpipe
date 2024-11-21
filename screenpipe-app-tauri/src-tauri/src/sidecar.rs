@@ -41,8 +41,12 @@ pub async fn kill_all_sreenpipes(
         }
         #[cfg(target_os = "windows")]
         {
+use std::os::windows::process::CommandExt;
+
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
             tokio::process::Command::new("taskkill")
                 .args(&["/F", "/IM", "screenpipe.exe"])
+                .creation_flags(CREATE_NO_WINDOW)
                 .output()
                 .await
         }
@@ -110,11 +114,6 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<CommandChild, String> {
 
     let port = store.get("port").and_then(|v| v.as_u64()).unwrap_or(3030);
 
-    let data_dir = store
-        .get("dataDir")
-        .and_then(|v| v.as_str().map(String::from))
-        .unwrap_or(String::from("default"));
-
     let disable_audio = store
         .get("disableAudio")
         .and_then(|v| v.as_bool())
@@ -157,6 +156,31 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<CommandChild, String> {
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let use_chinese_mirror = store
+        .get("useChineseMirror")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let languages = store
+        .get("languages")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+
+    let enable_beta = store
+        .get("enableBeta")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let enable_frame_cache = store
+        .get("enableFrameCache")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let enable_ui_monitoring = store
+        .get("enableUiMonitoring")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     println!("audio_chunk_duration: {}", audio_chunk_duration);
 
     let port_str = port.to_string();
@@ -165,12 +189,6 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<CommandChild, String> {
     if fps != 0.2 {
         args.push("--fps");
         args.push(fps_str.as_str());
-    }
-
-    if data_dir != "default" {
-        args.push("--data-dir");
-        let dir = data_dir.as_str();
-        args.push(dir);
     }
 
     if audio_transcription_engine != "default" {
@@ -189,6 +207,13 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<CommandChild, String> {
         for monitor in &monitor_ids {
             args.push("--monitor-id");
             args.push(monitor.as_str().unwrap());
+        }
+    }
+
+    if !languages.is_empty() && languages[0] != Value::String("default".to_string()) {
+        for language in &languages {
+            args.push("--language");
+            args.push(language.as_str().unwrap());
         }
     }
 
@@ -249,7 +274,17 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<CommandChild, String> {
         args.push("--disable-telemetry");
     }
 
-    // args.push("--debug");
+    if enable_beta {
+        args.push("--enable-beta");
+    }
+
+    if enable_frame_cache {
+        args.push("--enable-frame-cache");
+    }
+
+    if enable_ui_monitoring {
+        args.push("--enable-ui-monitoring");
+    }
 
     if cfg!(windows) {
         let exe_dir = env::current_exe()
@@ -258,12 +293,19 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<CommandChild, String> {
             .expect("Failed to get parent directory of executable")
             .to_path_buf();
         let tessdata_path = exe_dir.join("tessdata");
-        let c = app
+        let mut c = app
             .shell()
             .sidecar("screenpipe")
             .unwrap()
-            .env("TESSDATA_PREFIX", tessdata_path)
-            .args(&args);
+            .env("TESSDATA_PREFIX", tessdata_path);
+
+        if use_chinese_mirror {
+            c = c.env("HF_ENDPOINT", "https://hf-mirror.com");
+        }
+
+
+
+        let c = c.args(&args);
 
         let (_, child) = c.spawn().map_err(|e| {
             error!("Failed to spawn sidecar: {}", e);
@@ -275,7 +317,13 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<CommandChild, String> {
         return Ok(child);
     }
 
-    let command = app.shell().sidecar("screenpipe").unwrap().args(&args);
+    let mut command = app.shell().sidecar("screenpipe").unwrap();
+
+    if use_chinese_mirror {
+        command = command.env("HF_ENDPOINT", "https://hf-mirror.com");
+    }
+
+    let command = command.args(&args);
 
     let result = command.spawn();
     if let Err(e) = result {

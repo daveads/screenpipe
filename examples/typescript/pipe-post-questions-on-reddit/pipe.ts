@@ -1,3 +1,11 @@
+import * as fs from "node:fs";
+import nodemailer from "nodemailer";
+import {
+  ContentItem,
+  pipe,
+} from "@screenpipe/js";
+import process from "node:process";
+
 interface DailyLog {
   activity: string;
   category: string;
@@ -36,7 +44,7 @@ async function generateDailyLog(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${openaiApiKey}`,
+      Authorization: `Bearer ${openaiApiKey}`,
     },
     body: JSON.stringify({
       model: gptModel,
@@ -73,7 +81,7 @@ async function generateDailyLog(
   return content;
 }
 
-async function saveDailyLog(logEntry: DailyLog): Promise<void> {
+function saveDailyLog(logEntry: DailyLog): void {
   console.log("creating logs dir");
   const logsDir = `${process.env.PIPE_DIR}/logs`;
   console.log("logs dir:", logsDir);
@@ -85,15 +93,12 @@ async function saveDailyLog(logEntry: DailyLog): Promise<void> {
     .replace(/\..+/, "");
   const filename = `${timestamp}-${logEntry.category.replace("/", "-")}.json`;
   console.log("filename:", filename);
-  await fs.writeFile(
-    `${logsDir}/${filename}`,
-    JSON.stringify(logEntry, null, 2)
-  );
+  fs.writeFileSync(`${logsDir}/${filename}`, JSON.stringify(logEntry, null, 2));
 }
 
 function generateRedditLinks(content: string): string {
   const posts = content.split(/\[\d+\]/g).filter(Boolean);
-  let result = '';
+  let result = "";
 
   posts.forEach((post, index) => {
     const titleMatch = post.match(/\[TITLE\](.*?)\[\/TITLE\]/s);
@@ -103,18 +108,35 @@ function generateRedditLinks(content: string): string {
     if (titleMatch && bodyMatch && subredditsMatch) {
       const title = titleMatch[1].trim();
       const body = bodyMatch[1].trim();
-      const encodedTitle = encodeURIComponent(title);
-      const encodedBody = encodeURIComponent(`${title}\n\n${body}`);
+      
+      // Truncate title and body if they're too long
+      const maxTitleLength = 300; // Reddit's title limit
+      const maxBodyLength = 40000; // Reddit's body limit
+      const truncatedTitle = title.length > maxTitleLength 
+        ? title.slice(0, maxTitleLength - 3) + "..."
+        : title;
+      const truncatedBody = body.length > maxBodyLength
+        ? body.slice(0, maxBodyLength - 3) + "..."
+        : body;
 
-      result += `[${index + 1}] ${title}\n\n${body}\n\n`;
+      const encodedTitle = encodeURIComponent(truncatedTitle);
+      const encodedBody = encodeURIComponent(`${truncatedTitle}\n\n${truncatedBody}`);
 
-      subredditsMatch.forEach(subreddit => {
+      result += `### ${index + 1}. ${title}\n\n${body}\n\n`;
+
+      subredditsMatch.forEach((subreddit) => {
         const subredditName = subreddit.slice(2, -1);
-        const link = `https://www.reddit.com/r/${subredditName}/submit?title=${encodedTitle}&text=${encodedBody}`;
-        result += `${subreddit} <a href="${link}">SEND</a>\n`;
+        // Use a shorter URL format and handle potential URL length issues
+        try {
+          const link = `https://www.reddit.com/r/${subredditName}/submit?title=${encodedTitle}&text=${encodedBody}`;
+          result += `- ${subreddit} [SEND](${link})\n`;
+        } catch (error) {
+          console.warn(`failed to generate link for post ${index + 1} in r/${subredditName}:`, error);
+          result += `- ${subreddit} [POST TOO LONG - COPY MANUALLY]\n`;
+        }
       });
 
-      result += '\n';
+      result += "\n";
     }
   });
 
@@ -150,7 +172,7 @@ async function generateRedditQuestions(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${openaiApiKey}`,
+      Authorization: `Bearer ${openaiApiKey}`,
     },
     body: JSON.stringify({
       model: gptModel,
@@ -172,75 +194,41 @@ async function generateRedditQuestions(
   return generateRedditLinks(content);
 }
 
-async function retry<T>(
-  fn: () => Promise<T>,
-  maxAttempts: number = 3,
-  delay: number = 3000
-): Promise<T> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (attempt === maxAttempts) {
-        throw error;
-      }
-      console.log(`attempt ${attempt} failed, retrying in ${delay}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-  throw new Error("this should never happen");
-}
-
 async function sendEmail(
   to: string,
   password: string,
   subject: string,
   body: string
 ): Promise<void> {
-  const from = to; // assuming the sender is the same as the recipient
-  await retry(async () => {
-    const result = await pipe.sendEmail({
-      to,
-      from,
-      password,
-      subject,
-      body,
-    });
-    if (!result) {
-      throw new Error("failed to send email");
-    }
-    console.log(`email sent to ${to} with subject: ${subject}`);
+  // Create a transporter using SMTP
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com", // Replace with your SMTP server
+    port: 587,
+    secure: false, // Use TLS
+    auth: {
+      user: to, // assuming the sender is the same as the recipient
+      pass: password,
+    },
   });
-}
 
-async function getTodayLogs(): Promise<DailyLog[]> {
-  try {
-    const logsDir = `${process.env.PIPE_DIR}/logs`;
-    const today = new Date().toISOString().replace(/:/g, "-").split("T")[0]; // Get today's date in YYYY-MM-DD format
+  // Send mail with defined transport object
+  const info = await transporter.sendMail({
+    from: to, // sender address
+    to: to, // list of receivers
+    subject: subject, // Subject line
+    text: body, // plain text body
+  });
 
-    console.log("reading logs dir:", logsDir);
-    const files = await fs.readdir(logsDir);
-    console.log("files:", files);
-    const todayFiles = files.filter((file) => file.startsWith(today));
-    console.log("today's files:", todayFiles);
-
-    const logs: DailyLog[] = [];
-    for (const file of todayFiles) {
-      const content = await fs.readFile(`${logsDir}/${file}`);
-      logs.push(JSON.parse(content));
-    }
-
-    return logs;
-  } catch (error) {
-    console.warn("error getting today's logs:", error);
-    return [];
+  if (!info) {
+    throw new Error("failed to send email");
   }
+  console.log(`email sent to ${to} with subject: ${subject}`);
 }
 
 async function dailyLogPipeline(): Promise<void> {
   console.log("starting daily log pipeline");
 
-  const config = await pipe.loadConfig();
+  const config = pipe.loadPipeConfig();
   console.log("loaded config:", JSON.stringify(config, null, 2));
 
   const interval = config.interval * 1000;
@@ -255,35 +243,41 @@ async function dailyLogPipeline(): Promise<void> {
   const openaiApiKey = config.openaiApiKey;
   const windowName = config.windowName || "";
   const pageSize = config.pageSize;
-  const contentType = config.contentType || "ocr"; // Default to 'ocr' if not specified
+  const contentType = config.contentType || "ocr";
+
+  const emailEnabled = !!(emailAddress && emailPassword);
+  console.log("email enabled:", emailEnabled);
 
   console.log("creating logs dir");
   const logsDir = `${process.env.PIPE_DIR}/logs`;
   console.log("logs dir:", logsDir);
-  await fs.mkdir(logsDir).catch((error) => {
-    console.warn("error creating logs dir:", error);
-  });
+  try {
+    fs.mkdirSync(logsDir);
+  } catch (_error) {
+    console.warn("failed to create logs dir, probably already exists");
+  }
 
-  let lastEmailSent = new Date(0); // Initialize to a past date
+  let lastEmailSent = new Date(0);
 
-  // send a welcome email to announce what will happen, when it will happen, and what it will do
-  const welcomeEmail = `
-    Welcome to the daily reddit questions pipeline!
+  // Only send welcome email if email is enabled
+  if (emailEnabled) {
+    const welcomeEmail = `
+      Welcome to the daily reddit questions pipeline!
 
-    This pipe will send you a daily list of reddit questions based on your screen data.
-    ${
-      summaryFrequency === "daily"
-        ? `It will run at ${emailTime} every day.`
-        : `It will run every ${summaryFrequency} hours.`
-    }
-    
-  `;
-  await sendEmail(
-    emailAddress,
-    emailPassword,
-    "daily reddit questions",
-    welcomeEmail
-  );
+      This pipe will send you a daily list of reddit questions based on your screen data.
+      ${
+        summaryFrequency === "daily"
+          ? `It will run at ${emailTime} every day.`
+          : `It will run every ${summaryFrequency} hours.`
+      }
+    `;
+    await sendEmail(
+      emailAddress!,
+      emailPassword!,
+      "daily reddit questions",
+      welcomeEmail
+    );
+  }
 
   while (true) {
     try {
@@ -291,23 +285,23 @@ async function dailyLogPipeline(): Promise<void> {
       const oneMinuteAgo = new Date(now.getTime() - interval);
 
       const screenData = await pipe.queryScreenpipe({
-        start_time: oneMinuteAgo.toISOString(),
-        end_time: now.toISOString(),
-        window_name: windowName,
+        startTime: oneMinuteAgo.toISOString(),
+        endTime: now.toISOString(),
+        windowName: windowName,
         limit: pageSize,
-        content_type: contentType,
+        contentType: contentType,
       });
 
       if (screenData && screenData.data && screenData.data.length > 0) {
         const logEntry = await generateDailyLog(
           screenData.data,
-          dailylogPrompt,  // Use dailylogPrompt here instead of customPrompt
+          dailylogPrompt, // Use dailylogPrompt here instead of customPrompt
           gptModel,
           gptApiUrl,
           openaiApiKey
         );
         console.log("log entry:", logEntry);
-        await saveDailyLog(logEntry);
+        saveDailyLog(logEntry);
       }
 
       let shouldSendSummary = false;
@@ -332,11 +326,11 @@ async function dailyLogPipeline(): Promise<void> {
 
       if (shouldSendSummary) {
         const screenData = await pipe.queryScreenpipe({
-          start_time: oneMinuteAgo.toISOString(),
-          end_time: now.toISOString(),
-          window_name: windowName,
+          startTime: oneMinuteAgo.toISOString(),
+          endTime: now.toISOString(),
+          windowName: windowName,
           limit: pageSize,
-          content_type: contentType,
+          contentType: contentType,
         });
 
         if (screenData && screenData.data && screenData.data.length > 0) {
@@ -348,12 +342,26 @@ async function dailyLogPipeline(): Promise<void> {
             openaiApiKey
           );
           console.log("reddit questions:", redditQuestions);
-          await sendEmail(
-            emailAddress,
-            emailPassword,
-            "reddit questions",
-            redditQuestions
-          );
+
+          // Send email only if enabled
+          if (emailEnabled) {
+            await sendEmail(
+              emailAddress!,
+              emailPassword!,
+              "reddit questions",
+              redditQuestions
+            );
+          }
+
+          // Always send to inbox and desktop notification
+          await pipe.inbox.send({
+            title: "reddit questions",
+            body: redditQuestions,
+          });
+          await pipe.sendDesktopNotification({
+            title: "reddit questions",
+            body: "just sent you some reddit questions",
+          });
           lastEmailSent = now;
         }
       }

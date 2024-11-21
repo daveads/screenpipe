@@ -1,41 +1,21 @@
-const NOTION_API_URL = "https://api.notion.com/v1/pages";
+import { Client } from "@notionhq/client";
+import { z } from "zod";
+import { generateObject } from "ai";
+import { createOllama } from "ollama-ai-provider";
+import { pipe, ContentItem } from "@screenpipe/js";
 
-interface ScreenData {
-  data: {
-    content: {
-      timestamp: string;
-      text: string;
-    };
-  }[];
-}
+const engineeringLog = z.object({
+  title: z.string(),
+  description: z.string(),
+  tags: z.array(z.string()),
+});
 
-interface EngineeringLog {
-  title: string;
-  description: string;
-  tags: string[];
-}
-
-async function queryScreenpipe(
-  startTime: string,
-  endTime: string
-): Promise<ScreenData> {
-  try {
-    const queryParams = `start_time=${startTime}&end_time=${endTime}&limit=50&content_type=ocr`;
-    const response = await fetch(`http://localhost:3030/search?${queryParams}`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error("Error querying screenpipe:", error);
-    return { data: [] };
-  }
-}
+type EngineeringLog = z.infer<typeof engineeringLog>;
 
 async function generateEngineeringLog(
-  screenData: ScreenData,
-  ollamaApiUrl: string,
-  ollamaModel: string
+  screenData: ContentItem[],
+  ollamaModel: string,
+  ollamaApiUrl: string
 ): Promise<EngineeringLog> {
   const prompt = `Based on the following screen data, generate a concise engineering log entry:
 
@@ -50,74 +30,64 @@ async function generateEngineeringLog(
     }
     Provide 1-3 relevant tags related to the engineering work.`;
 
-  const response = await fetch(ollamaApiUrl + "/chat", {
-    method: "POST",
-    body: JSON.stringify({
-      model: ollamaModel,
-      messages: [{ role: "user", content: prompt }],
-      stream: false,
-    }),
+  const provider = createOllama({ baseURL: ollamaApiUrl });
+
+  const response = await generateObject({
+    model: provider(ollamaModel),
+    messages: [{ role: "user", content: prompt }],
+    schema: engineeringLog,
   });
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error("Error generating engineering log:", errorBody);
-    throw new Error(
-      `HTTP error! status: ${response.status}, body: ${errorBody}`
-    );
-  }
 
-  const result = await response.json();
+  console.log("ai answer:", response);
 
-  console.log("AI answer:", result);
-
-  const content = result.message.content;
-  return JSON.parse(content);
+  return response.object;
 }
 
 async function syncLogToNotion(
   logEntry: EngineeringLog,
-  apiKey: string,
+  notion: Client,
   databaseId: string
 ): Promise<void> {
   try {
     console.log("syncLogToNotion", logEntry);
-    const response = await fetch(NOTION_API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        parent: { database_id: databaseId },
-        properties: {
-          Title: { title: [{ text: { content: logEntry.title } }] },
-          Description: {
-            rich_text: [{ text: { content: logEntry.description } }],
-          },
-          Tags: { multi_select: logEntry.tags.map((tag) => ({ name: tag })) },
-          Date: { date: { start: new Date().toISOString() } },
+    await notion.pages.create({
+      parent: { database_id: databaseId },
+      properties: {
+        Title: { title: [{ text: { content: logEntry.title } }] },
+        Description: {
+          rich_text: [{ text: { content: logEntry.description } }],
         },
-      }),
+        Tags: { multi_select: logEntry.tags.map((tag) => ({ name: tag })) },
+        Date: { date: { start: new Date().toISOString() } },
+      },
     });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(
-        `HTTP error! status: ${response.status}, body: ${errorBody}`
-      );
-    }
+    console.log("engineering log synced to notion successfully");
 
-    console.log("Engineering log synced to Notion successfully");
+    // Create markdown table for inbox
+    const markdownTable = `
+| Title | Description | Tags |
+|-------|-------------|------|
+| ${logEntry.title} | ${logEntry.description} | ${logEntry.tags.join(", ")} |
+    `.trim();
+
+    await pipe.inbox.send({
+      title: "engineering log synced",
+      body: `new engineering log entry:\n\n${markdownTable}`,
+    });
   } catch (error) {
-    console.error("Error syncing engineering log to Notion:", error);
+    console.error("error syncing engineering log to notion:", error);
+    await pipe.inbox.send({
+      title: "engineering log error",
+      body: `error syncing engineering log to notion: ${error}`,
+    });
   }
 }
 
-async function streamEngineeringLogsToNotion(): Promise<void> {
-  console.log("Starting Engineering Logs Stream to Notion");
+function streamEngineeringLogsToNotion(): void {
+  console.log("starting engineering logs stream to notion");
 
-  const config = await pipe.loadConfig();
+  const config = pipe.loadPipeConfig();
   console.log("loaded config:", JSON.stringify(config, null, 2));
 
   const interval = config.interval * 1000;
@@ -126,31 +96,48 @@ async function streamEngineeringLogsToNotion(): Promise<void> {
   const ollamaApiUrl = config.ollamaApiUrl;
   const ollamaModel = config.ollamaModel;
 
-  while (true) {
-    try {
-      const now = new Date();
-      const oneHourAgo = new Date(now.getTime() - interval);
+  const notion = new Client({ auth: apiKey });
 
-      const screenData = await queryScreenpipe(
-        oneHourAgo.toISOString(),
-        now.toISOString()
-      );
+  pipe.inbox.send({
+    title: "engineering log stream started",
+    body: `monitoring engineering work every ${config.interval} seconds`,
+  });
 
-      if (screenData.data && screenData.data.length > 0) {
-        const logEntry = await generateEngineeringLog(
-          screenData,
-          ollamaApiUrl,
-          ollamaModel
-        );
-        await syncLogToNotion(logEntry, apiKey, databaseId);
-      } else {
-        console.log("No relevant engineering work detected in the last hour");
+  pipe.scheduler
+    .task("generateEngineeringLog")
+    .every(interval)
+    .do(async () => {
+      try {
+        const now = new Date();
+        const oneHourAgo = new Date(now.getTime() - interval);
+
+        const screenData = await pipe.queryScreenpipe({
+          startTime: oneHourAgo.toISOString(),
+          endTime: now.toISOString(),
+          limit: 50,
+          contentType: "ocr",
+        });
+
+        if (screenData && screenData.data.length > 0) {
+          const logEntry = await generateEngineeringLog(
+            screenData.data,
+            ollamaModel,
+            ollamaApiUrl
+          );
+          await syncLogToNotion(logEntry, notion, databaseId);
+        } else {
+          console.log("no relevant engineering work detected in the last hour");
+        }
+      } catch (error) {
+        console.error("error in engineering log pipeline:", error);
+        await pipe.inbox.send({
+          title: "engineering log error",
+          body: `error in engineering log pipeline: ${error}`,
+        });
       }
-    } catch (error) {
-      console.error("Error in engineering log pipeline:", error);
-    }
-    await new Promise((resolve) => setTimeout(resolve, interval));
-  }
+    });
+
+  pipe.scheduler.start();
 }
 
 streamEngineeringLogsToNotion();
