@@ -16,6 +16,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Add this step to create the missing directory structure
+      - name: Setup workspace
+        run: |
+          mkdir -p screenpipe-app-tauri/scripts/screenpipe_build
+          # Create a minimal Cargo.toml in the missing directory
+          cat > screenpipe-app-tauri/scripts/screenpipe_build/Cargo.toml << EOF
+          [package]
+          name = "screenpipe_build"
+          version = "0.1.0"
+          edition = "2021"
+          
+          [dependencies]
+          EOF
+
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -47,11 +61,22 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      # Add debugging output for workspace structure
+      - name: Debug workspace
+        run: |
+          echo "Current directory structure:"
+          ls -la
+          echo "Content of Cargo.toml:"
+          cat Cargo.toml
+          echo "Workspace member directory:"
+          ls -la screenpipe-app-tauri/scripts/screenpipe_build || echo "Directory does not exist"
+
       - name: Build with RPATH
         run: |
           export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
           export RUSTFLAGS="-C link-arg=-Wl,-rpath,\$ORIGIN/../lib"
-          cargo build --release --features pipes
+          # Build only the CLI binary, not the entire workspace
+          cargo build --release --features pipes --package screenpipe
           # Print cargo version and build info for debugging
           cargo --version
           rustc --version
