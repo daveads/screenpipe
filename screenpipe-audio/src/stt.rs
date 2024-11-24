@@ -36,6 +36,8 @@ use screenpipe_core::Language;
 use serde_json::Value;
 use std::io::Cursor;
 
+use crate::pyannote::models::{get_or_download_model, PyannoteModel};
+
 async fn transcribe_with_deepgram(
     api_key: &str,
     audio_data: &[f32],
@@ -287,14 +289,7 @@ pub async fn prepare_segments(
     embedding_manager: EmbeddingManager,
     embedding_extractor: Arc<StdMutex<EmbeddingExtractor>>,
 ) -> Result<tokio::sync::mpsc::Receiver<SpeechSegment>> {
-    info!("Preparing segments");
     let audio_data = if audio_input.sample_rate != m::SAMPLE_RATE as u32 {
-        info!(
-            "device: {}, resampling from {} Hz to {} Hz",
-            audio_input.device,
-            audio_input.sample_rate,
-            m::SAMPLE_RATE
-        );
         resample(
             audio_input.data.as_ref(),
             audio_input.sample_rate,
@@ -337,6 +332,14 @@ pub async fn prepare_segments(
     let speech_ratio = speech_frame_count as f32 / total_frames as f32;
     let min_speech_ratio = vad_engine.lock().await.get_min_speech_ratio();
 
+    info!(
+        "device: {}, speech ratio: {}, min_speech_ratio: {}, audio_frames: {}, speech_frames: {}",
+        audio_input.device,
+        speech_ratio,
+        min_speech_ratio,
+        audio_frames.len(),
+        speech_frame_count
+    );
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     if !audio_frames.is_empty() && speech_ratio >= min_speech_ratio {
         let segments = get_segments(
@@ -533,17 +536,8 @@ pub async fn create_whisper_channel(
     let shutdown_flag_clone = shutdown_flag.clone();
     let output_path = output_path.clone();
 
-    let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-    let embedding_model_path = project_dir
-        .join("models")
-        .join("pyannote")
-        .join("wespeaker_en_voxceleb_CAM++.onnx");
-
-    let segmentation_model_path = project_dir
-        .join("models")
-        .join("pyannote")
-        .join("segmentation-3.0.onnx");
+    let embedding_model_path = get_or_download_model(PyannoteModel::Embedding).await?;
+    let segmentation_model_path = get_or_download_model(PyannoteModel::Segmentation).await?;
 
     let embedding_extractor = Arc::new(StdMutex::new(EmbeddingExtractor::new(
         embedding_model_path

@@ -41,8 +41,7 @@ const config = {
 			'libavfilter-dev',
 			'libavdevice-dev', // FFMPEG
 			'libasound2-dev', // cpal
-			'libxdo-dev',
-			'intel-openmp'
+			'libxdo-dev'
 		],
 	},
 	macos: {
@@ -314,28 +313,6 @@ if (platform == 'windows') {
 		await $`mv ${config.windows.ffmpegName} ${config.ffmpegRealname}`
 		await $`rm -rf ${config.windows.ffmpegName}.7z`
 	}
-
-	// Setup ONNX Runtime
-	const onnxRuntimeName = "onnxruntime-win-x64-gpu-1.19.2";
-	const onnxRuntimeLibs = `${onnxRuntimeName}.zip`;
-	const onnxRuntimeUrl = `https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/${onnxRuntimeLibs}`
-	if (!(await fs.exists(onnxRuntimeName))) {
-		console.log('Setting up ONNX Runtime libraries for Windows...')
-		try {
-			await $`${wgetPath} --no-config -nc --no-check-certificate --show-progress ${onnxRuntimeUrl} -O ${onnxRuntimeLibs}`
-			await $`unzip ${onnxRuntimeLibs} || tar -xf ${onnxRuntimeLibs} || echo "Done extracting"`;
-			await $`rm -rf ${onnxRuntimeLibs} || rm ${onnxRuntimeLibs} -Recurse -Force || echo "Done cleaning up zip"`;
-			console.log('ONNX Runtime libraries for Windows set up successfully.')
-		} catch (error) {
-			console.error('Error downloading or extracting ONNX Runtime:', error);
-			console.log('Attempting alternative download method...');
-			// Add alternative download method here
-		}
-	} else {
-		console.log('ONNX Runtime libraries for Windows already exists.')
-	}
-
-
 
 	// Setup vcpkg packages with environment variables set inline
 	await $`SystemDrive=${process.env.SYSTEMDRIVE} SystemRoot=${process.env.SYSTEMROOT} windir=${process.env.WINDIR} C:\\vcpkg\\vcpkg.exe install ${config.windows.vcpkgPackages}`.quiet()

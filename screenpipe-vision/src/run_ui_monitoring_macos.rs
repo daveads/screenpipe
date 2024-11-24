@@ -1,28 +1,43 @@
-use tokio::process::Command;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use std::process::Stdio;
 use anyhow::Result;
-use log::{info, warn, error, debug};
-use tokio::time::{sleep, Duration};
+use log::{debug, error, info, warn};
 use std::path::PathBuf;
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::time::{sleep, Duration};
+use which::which;
 
 pub async fn run_ui() -> Result<()> {
     info!("starting ui monitoring service...");
 
-    let binary_name = if cfg!(target_arch = "aarch64") {
-        "ui_monitor-aarch64-apple-darwin"
-    } else {
-        "ui_monitor-x86_64-apple-darwin"
-    };
+    let binary_name = "ui_monitor";
 
     // Try screenpipe-vision/bin first
     let bin_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("bin")
         .join(binary_name);
 
+    // If not found, try current directory
+    let current_dir_path = std::env::current_dir()?.join(binary_name);
+
+    // Try the directory of the current executable
+    let exe_dir_path = std::env::current_exe()?
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(binary_name);
+
+    // Try using which
+    let which_path = which(binary_name).ok();
+
     // If not found, try tauri location
     let ui_monitor_path = if bin_path.exists() {
         bin_path
+    } else if current_dir_path.exists() {
+        current_dir_path
+    } else if exe_dir_path.exists() {
+        exe_dir_path
+    } else if let Some(path) = which_path {
+        path
     } else {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
