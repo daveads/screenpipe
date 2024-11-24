@@ -1,9 +1,9 @@
-name: Release CLI LINUX
+name: Release CLI Test
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - cli-test
   workflow_dispatch:
 
 permissions:
@@ -50,18 +50,27 @@ jobs:
       - name: Build with RPATH
         run: |
           export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
-          # Set RPATH to look for shared libraries in relative lib directory
           export RUSTFLAGS="-C link-arg=-Wl,-rpath,\$ORIGIN/../lib"
           cargo build --release --features pipes
+          # Print cargo version and build info for debugging
+          cargo --version
+          rustc --version
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+          echo "RUSTFLAGS=$RUSTFLAGS"
 
-      - name: Copy dependencies
+      - name: Create package structure
         run: |
           mkdir -p screenpipe-linux/bin
           mkdir -p screenpipe-linux/lib
-          # Copy the main binary
           cp target/release/screenpipe screenpipe-linux/bin/
           chmod +x screenpipe-linux/bin/screenpipe
-          # Copy required shared libraries
+          
+          # List required libraries
+          echo "Listing dependencies:"
+          ldd target/release/screenpipe
+
+          # Copy libraries
+          echo "Copying libraries..."
           cp /usr/lib/x86_64-linux-gnu/libavcodec.so* screenpipe-linux/lib/
           cp /usr/lib/x86_64-linux-gnu/libavformat.so* screenpipe-linux/lib/
           cp /usr/lib/x86_64-linux-gnu/libavutil.so* screenpipe-linux/lib/
@@ -70,60 +79,31 @@ jobs:
           cp /usr/lib/x86_64-linux-gnu/libavfilter.so* screenpipe-linux/lib/
           cp /usr/lib/x86_64-linux-gnu/libavdevice.so* screenpipe-linux/lib/
           cp /usr/lib/x86_64-linux-gnu/libtesseract.so* screenpipe-linux/lib/
-          # Copy any other required dependencies
-          ldd target/release/screenpipe | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp -v '{}' screenpipe-linux/lib/
+
+          # List copied libraries for verification
+          echo "Contents of lib directory:"
+          ls -la screenpipe-linux/lib/
 
       - name: Create tarball
         run: |
           tar -czf screenpipe-linux-x86_64.tar.gz screenpipe-linux
+          echo "Created tarball:"
+          ls -lh screenpipe-linux-x86_64.tar.gz
+
+      - name: Test package
+        run: |
+          mkdir test-dir
+          cd test-dir
+          tar xf ../screenpipe-linux-x86_64.tar.gz
+          echo "Testing binary..."
+          LD_LIBRARY_PATH=./screenpipe-linux/lib ./screenpipe-linux/bin/screenpipe --version || {
+            echo "Test failed. Checking library dependencies:"
+            ldd ./screenpipe-linux/bin/screenpipe
+            exit 1
+          }
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: screenpipe-linux
           path: screenpipe-linux-x86_64.tar.gz
-
-  test-linux-package:
-    needs: build-linux
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: screenpipe-linux
-
-      - name: Extract and test package
-        run: |
-          tar xf screenpipe-linux-x86_64.tar.gz
-          cd screenpipe-linux
-          # Test if binary runs
-          LD_LIBRARY_PATH=./lib ./bin/screenpipe --version
-
-  release:
-    needs: [test-linux-package]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: screenpipe-linux
-
-      # Set version from tag or generate fallback version
-      - name: Set version
-        run: |
-          if [[ $GITHUB_REF == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            VERSION="0.0.0-$(date +%Y%m%d%H%M%S)"
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-      - name: Create Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create v${{ env.VERSION }} screenpipe-linux-x86_64.tar.gz \
-            --title "Release v${{ env.VERSION }}" \
-            --generate-notes \
-            --draft=false \
-            || gh release upload v${{ env.VERSION }} screenpipe-linux-x86_64.tar.gz --clobber
